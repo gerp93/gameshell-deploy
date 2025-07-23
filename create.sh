@@ -15,16 +15,19 @@ cd "$(dirname "$0")"
 BACKUP_SQL_PATH="$(pwd)/../database/backup.sql"
 if [ ! -f "$BACKUP_SQL_PATH" ]; then
 	echo "File not found: $BACKUP_SQL_PATH"
+	exit 1
 fi
 
 SETUP_SCRIPT_PATH="$(pwd)/templates/setup.sh"
 if [ ! -f "$SETUP_SCRIPT_PATH" ]; then
 	echo "File not found: $SETUP_SCRIPT_PATH"
+	exit 1
 fi
 
 APP_SPEC_PATH="$(pwd)/templates/spec.yaml"
 if [ ! -f "$APP_SPEC_PATH" ]; then
 	echo "File not found: $APP_SPEC_PATH"
+	exit 1
 fi
 
 ################################################################################
