@@ -30,17 +30,29 @@ ssh root@$DROPLET_IP 'mariadb-dump --order-by-primary CARD_JUDGE | sed -e '\''s/
 scp root@$DROPLET_IP:/root/backup.sql "$BACKUP_SQL_PATH" >/dev/null 2>&1
 
 if [ ! -f "$BACKUP_SQL_PATH" ]; then
-    echo "Backup failed: backup file not found"
+	echo "Backup failed: backup file not found"
 	exit 1
 fi
 
 if [ ! -s "$BACKUP_SQL_PATH" ]; then
-    echo "Backup failed: backup file is empty"
+	echo "Backup failed: backup file is empty"
 	exit 1
 fi
 
 if find "$BACKUP_SQL_PATH" -mmin +1 -print -quit | grep -q .; then
-    echo "Backup failed: backup file is older than 1 minute"
+	echo "Backup failed: backup file is older than 1 minute"
+	exit 1
+fi
+
+BACKUP_SQL_SIZE=$(stat -c%s "$BACKUP_SQL_PATH")
+if (( filesize < 1024 )); then
+	echo "Backup failed: backup file is too small"
+	exit 1
+fi
+
+BACKUP_SQL_LAST_LINE=$(tail -n 1 "$BACKUP_SQL_PATH")
+if ! [[ "$BACKUP_SQL_LAST_LINE" =~ ^"-- Dump completed on " ]]; then
+	echo "Backup failed: backup file does not appear to be valid"
 	exit 1
 fi
 
