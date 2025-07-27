@@ -5,13 +5,10 @@
 
 set -e # exit on any command error
 
-APP_NAME="card-judge"
-
-################################################################################
-# get file paths
-
 cd "$(dirname "$0")"
-BACKUP_SQL_PATH="$(pwd)/../database/backup.sql"
+
+APP_NAME="card-judge"
+DROPLET_NAME="$APP_NAME-database"
 
 ################################################################################
 # backup database
@@ -21,7 +18,8 @@ if [[ "$BACKUP_DB" != "n" ]]; then
 	echo "----------------------------------------"
 	echo "Backing Up Database..."
 
-	DROPLET_NAME="$APP_NAME-database"
+	BACKUP_SQL_PATH="$(pwd)/../database/backup.sql"
+
 	DROPLET_IP=$(doctl compute droplet list --format=PublicIPv4,Name --no-header | grep $DROPLET_NAME | cut -d ' ' -f 1)
 	if [[ -z "$DROPLET_IP" ]]; then
 		echo "Droplet IP not found"
@@ -67,7 +65,7 @@ fi
 echo "----------------------------------------"
 echo "Deleting Droplet..."
 
-DROPLET_ID=$(doctl compute droplet list --format=ID,Name --no-header | grep $APP_NAME | cut -d ' ' -f 1)
+DROPLET_ID=$(doctl compute droplet list --format=ID,Name --no-header | grep $DROPLET_NAME | cut -d ' ' -f 1)
 if [[ -z "$DROPLET_ID" ]]; then
 	echo "Droplet ID not found"
 	exit 1

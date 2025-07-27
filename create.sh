@@ -5,12 +5,13 @@
 
 set -e # exit on any command error
 
+cd "$(dirname "$0")"
+
 APP_NAME="card-judge"
+DROPLET_NAME="$APP_NAME-database"
 
 ################################################################################
 # check expected files
-
-cd "$(dirname "$0")"
 
 BACKUP_SQL_PATH="$(pwd)/../database/backup.sql"
 if [ ! -f "$BACKUP_SQL_PATH" ]; then
@@ -70,8 +71,6 @@ fi
 
 echo "----------------------------------------"
 echo "Creating Droplet..."
-
-DROPLET_NAME="$APP_NAME-database"
 
 if doctl compute droplet list --format=Name --no-header | grep -q $DROPLET_NAME; then
 	echo "Droplet already exists"
