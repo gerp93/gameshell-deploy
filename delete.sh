@@ -18,7 +18,7 @@ if [[ "$BACKUP_DB" != "n" ]]; then
 	echo "----------------------------------------"
 	echo "Backing Up Database..."
 
-	BACKUP_SQL_PATH="$(pwd)/../database/backup.sql"
+	BACKUP_SQL_PATH="$(pwd)/backups/$(date +%Y%m%d%H%M%S)_backup_card_judge.sql"
 
 	DROPLET_IP=$(doctl compute droplet list --format=PublicIPv4,Name --no-header | grep $DROPLET_NAME | cut -d ' ' -f 1)
 	if [[ -z "$DROPLET_IP" ]]; then
@@ -53,6 +53,15 @@ if [[ "$BACKUP_DB" != "n" ]]; then
 	BACKUP_SQL_LAST_LINE=$(tail -n 1 "$BACKUP_SQL_PATH")
 	if ! [[ "$BACKUP_SQL_LAST_LINE" =~ ^"-- Dump completed on " ]]; then
 		echo "Backup failed: backup file does not appear to be valid"
+		exit 1
+	fi
+
+	BACKUP_GPG_PATH="$BACKUP_SQL_PATH".gpg
+	rm -f $BACKUP_GPG_PATH
+	gpg -c --output $BACKUP_GPG_PATH $BACKUP_SQL_PATH
+
+	if [ ! -f "$BACKUP_GPG_PATH" ]; then
+		echo "File not found: $BACKUP_GPG_PATH"
 		exit 1
 	fi
 

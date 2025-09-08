@@ -11,9 +11,26 @@ APP_NAME="card-judge"
 DROPLET_NAME="$APP_NAME-database"
 
 ################################################################################
+# get latest database backup
+
+cd backups
+
+BACKUP_GPG_FILE=$(ls *.gpg | tail -n 1)
+BACKUP_GPG_PATH="$(pwd)/$BACKUP_GPG_FILE"
+if [ ! -f "$BACKUP_GPG_PATH" ]; then
+	echo "File not found: $BACKUP_GPG_PATH"
+	exit 1
+fi
+
+BACKUP_SQL_PATH="${BACKUP_GPG_PATH::-4}"
+rm -f $BACKUP_SQL_PATH
+gpg -d --output $BACKUP_SQL_PATH $BACKUP_GPG_PATH
+
+cd ..
+
+################################################################################
 # check expected files
 
-BACKUP_SQL_PATH="$(pwd)/../database/backup.sql"
 if [ ! -f "$BACKUP_SQL_PATH" ]; then
 	echo "File not found: $BACKUP_SQL_PATH"
 	exit 1
