@@ -102,7 +102,7 @@ DROPLET_IP=$(
 		--ssh-keys=$SSH_KEY_ID \
 		--region=nyc3 \
 		--image=centos-stream-9-x64 \
-		--size=s-4vcpu-8gb-amd \
+		--size=s-1vcpu-1gb-amd \
 		--user-data-file="$SETUP_SCRIPT_PATH" \
 		--format=PublicIPv4 \
 		--no-header \

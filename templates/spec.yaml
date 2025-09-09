@@ -38,6 +38,6 @@ services:
     repo: GrantFBarnes/card-judge
   http_port: 2016
   instance_count: 1
-  instance_size_slug: apps-s-2vcpu-4gb
+  instance_size_slug: apps-s-1vcpu-0.5gb
   name: REPLACE_APP_NAME
   source_dir: /
