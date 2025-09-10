@@ -66,6 +66,11 @@ if [[ -z "$CARD_JUDGE_JWT_SECRET" ]]; then
 	exit 1
 fi
 
+if [[ -z "$CARD_JUDGE_GIT_REPO" ]]; then
+	echo "Environment variable not found: CARD_JUDGE_GIT_REPO"
+	exit 1
+fi
+
 ################################################################################
 # get ssh key
 
