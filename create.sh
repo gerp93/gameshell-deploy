@@ -77,9 +77,8 @@ if [[ "$REPO" != "$UPSTREAM_REPO" ]]; then
         git remote add upstream https://github.com/$UPSTREAM_REPO.git
     fi
     git fetch upstream
-    git checkout main
-    git merge upstream/main
-    git push origin main
+    # Push upstream/main directly to origin/main without modifying local main
+    git push origin upstream/main:main
 else
     echo "Upstream repo is the same as repo, skipping sync."
 fi
