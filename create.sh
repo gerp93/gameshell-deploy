@@ -124,7 +124,14 @@ echo "Droplet Created"
 echo "Droplet IP: $DROPLET_IP"
 
 echo "Waiting 15 minutes for droplet to finish setup..."
-sleep 15m
+TOTAL_WAIT_SECONDS=$((15 * 60))
+for (( WAIT_SECOND = TOTAL_WAIT_SECONDS; WAIT_SECOND >= 0; WAIT_SECOND-- )); do
+	WAIT_MINUTES_REMAINING=$((WAIT_SECOND / 60))
+	WAIT_SECONDS_REMAINING=$((WAIT_SECOND % 60))
+	printf "\rTime remaining: %02d:%02d" "$WAIT_MINUTES_REMAINING" "$WAIT_SECONDS_REMAINING"
+	sleep 1
+done
+echo ""
 
 ################################################################################
 # restore database from backup
