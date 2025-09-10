@@ -125,18 +125,39 @@ if [[ -z "$DROPLET_IP" ]]; then
 	fi
 fi
 
-echo "Droplet Created"
-echo "Droplet IP: $DROPLET_IP"
+DROPLET_ID=$(doctl compute droplet list --format=ID,Name --no-header | grep $DROPLET_NAME | cut -d ' ' -f 1)
+if [[ -z "$DROPLET_ID" ]]; then
+	echo "Droplet ID not found"
+	exit 1
+fi
 
-echo "Waiting 15 minutes for droplet to finish setup..."
-TOTAL_WAIT_SECONDS=$((15 * 60))
-for (( WAIT_SECOND = TOTAL_WAIT_SECONDS; WAIT_SECOND >= 0; WAIT_SECOND-- )); do
-	WAIT_MINUTES_REMAINING=$((WAIT_SECOND / 60))
-	WAIT_SECONDS_REMAINING=$((WAIT_SECOND % 60))
-	printf "\rTime remaining: %02d:%02d" "$WAIT_MINUTES_REMAINING" "$WAIT_SECONDS_REMAINING"
-	sleep 1
+echo "Droplet Created"
+
+################################################################################
+# finish droplet setup
+
+echo "----------------------------------------"
+echo "Finishing Droplet Setup..."
+
+sleep 1m
+
+DONE_CHECKS_REMAINING=15
+while ! doctl compute droplet get $DROPLET_ID --format=Status --no-header | grep -q "off"; do
+	((DONE_CHECKS_REMAINING--))
+	if [ "$DONE_CHECKS_REMAINING" -eq 0 ]; then
+		echo "Droplet never finished setup, deleting droplet..."
+		doctl compute droplet delete $DROPLET_ID --force
+		echo "Droplet Deleted"
+		exit 1
+	fi
+	echo "Droplet setup not finished yet, waiting 1 minute..."
+	sleep 1m
 done
-echo ""
+
+doctl compute droplet-action power-on $DROPLET_ID --wait > /dev/null
+sleep 15s
+
+echo "Droplet Finished Setup"
 
 ################################################################################
 # restore database from backup
