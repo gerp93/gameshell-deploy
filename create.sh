@@ -67,6 +67,24 @@ if [[ -z "$CARD_JUDGE_JWT_SECRET" ]]; then
 fi
 
 ################################################################################
+# sync fork with upstream if needed
+REPO=$(grep 'repo:' "$APP_SPEC_PATH" | awk '{print $2}')
+UPSTREAM_REPO=$(grep 'upstream_repo:' "$APP_SPEC_PATH" | awk '{print $2}')
+if [[ "$REPO" != "$UPSTREAM_REPO" ]]; then
+    echo "Syncing fork with upstream $UPSTREAM_REPO..."
+    # Add upstream remote if it doesn't exist
+    if ! git remote | grep -q upstream; then
+        git remote add upstream https://github.com/$UPSTREAM_REPO.git
+    fi
+    git fetch upstream
+    git checkout main
+    git merge upstream/main
+    git push origin main
+else
+    echo "Upstream repo is the same as repo, skipping sync."
+fi
+
+################################################################################
 # get ssh key
 
 echo "Which of the following SSH Keys should have access to the database droplet?"
