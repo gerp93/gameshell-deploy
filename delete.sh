@@ -77,12 +77,10 @@ echo "Deleting Droplet..."
 DROPLET_ID=$(doctl compute droplet list --format=ID,Name --no-header | grep $DROPLET_NAME | cut -d ' ' -f 1)
 if [[ -z "$DROPLET_ID" ]]; then
 	echo "Droplet ID not found"
-	exit 1
+else
+	doctl compute droplet delete $DROPLET_ID --force
+	echo "Droplet Deleted"
 fi
-
-doctl compute droplet delete $DROPLET_ID --force
-
-echo "Droplet Deleted"
 
 ################################################################################
 # delete app
@@ -93,12 +91,10 @@ echo "Deleting App..."
 APP_ID=$(doctl apps list --format=ID,Spec.Name --no-header | grep $APP_NAME | cut -d ' ' -f 1)
 if [[ -z "$APP_ID" ]]; then
 	echo "App ID not found"
-	exit 1
+else
+	doctl apps delete $APP_ID --force
+	echo "App Deleted"
 fi
-
-doctl apps delete $APP_ID --force
-
-echo "App Deleted"
 
 ################################################################################
 

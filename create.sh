@@ -66,6 +66,11 @@ if [[ -z "$CARD_JUDGE_JWT_SECRET" ]]; then
 	exit 1
 fi
 
+if [[ -z "$CARD_JUDGE_GIT_REPO" ]]; then
+	echo "Environment variable not found: CARD_JUDGE_GIT_REPO"
+	exit 1
+fi
+
 ################################################################################
 # sync fork with upstream if needed
 REPO=$(grep 'repo:' "$APP_SPEC_PATH" | awk '{print $2}')
@@ -137,11 +142,39 @@ if [[ -z "$DROPLET_IP" ]]; then
 	fi
 fi
 
-echo "Droplet Created"
-echo "Droplet IP: $DROPLET_IP"
+DROPLET_ID=$(doctl compute droplet list --format=ID,Name --no-header | grep $DROPLET_NAME | cut -d ' ' -f 1)
+if [[ -z "$DROPLET_ID" ]]; then
+	echo "Droplet ID not found"
+	exit 1
+fi
 
-echo "Waiting 15 minutes for droplet to finish setup..."
-sleep 15m
+echo "Droplet Created"
+
+################################################################################
+# finish droplet setup
+
+echo "----------------------------------------"
+echo "Finishing Droplet Setup..."
+
+sleep 1m
+
+DONE_CHECKS_REMAINING=15
+while ! doctl compute droplet get $DROPLET_ID --format=Status --no-header | grep -q "off"; do
+	((DONE_CHECKS_REMAINING--))
+	if [ "$DONE_CHECKS_REMAINING" -eq 0 ]; then
+		echo "Droplet never finished setup, deleting droplet..."
+		doctl compute droplet delete $DROPLET_ID --force
+		echo "Droplet Deleted"
+		exit 1
+	fi
+	echo "Droplet setup not finished yet, waiting 1 minute..."
+	sleep 1m
+done
+
+doctl compute droplet-action power-on $DROPLET_ID --wait > /dev/null
+sleep 15s
+
+echo "Droplet Finished Setup"
 
 ################################################################################
 # restore database from backup
@@ -169,7 +202,7 @@ sed -i -e 's/REPLACE_CARD_JUDGE_SQL_HOST/'"$DROPLET_IP"'/g' "$APP_SPEC_PATH"
 sed -i -e 's/REPLACE_CARD_JUDGE_SQL_USER/'"$CARD_JUDGE_SQL_USER"'/g' "$APP_SPEC_PATH"
 sed -i -e 's/REPLACE_CARD_JUDGE_SQL_PASSWORD/'"$CARD_JUDGE_SQL_PASSWORD"'/g' "$APP_SPEC_PATH"
 sed -i -e 's/REPLACE_CARD_JUDGE_JWT_SECRET/'"$CARD_JUDGE_JWT_SECRET"'/g' "$APP_SPEC_PATH"
-sed -i -e 's/REPLACE_CARD_JUDGE_GIT_REPO/'"$CARD_JUDGE_GIT_REPO"'/g' "$APP_SPEC_PATH"
+sed -i -e 's/REPLACE_CARD_JUDGE_GIT_REPO/'"${CARD_JUDGE_GIT_REPO//\//\\/}"'/g' "$APP_SPEC_PATH"
 
 APP_URL=$(
 	doctl apps create \
