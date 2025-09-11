@@ -73,10 +73,10 @@ fi
 
 ################################################################################
 # sync fork with upstream if needed
-REPO="$CARD_JUDGE_GIT_REPO"
+
 UPSTREAM_REPO="GrantFBarnes/card-judge" # Hardcoded value
-if [[ "$REPO" != "$UPSTREAM_REPO" ]]; then
-	echo "Syncing fork $REPO with upstream $UPSTREAM_REPO..."
+if [[ "$CARD_JUDGE_GIT_REPO" != "$UPSTREAM_REPO" ]]; then
+	echo "Syncing fork $CARD_JUDGE_GIT_REPO with upstream $UPSTREAM_REPO..."
 	# Add upstream remote if it doesn't exist
 	if ! git remote | grep -q upstream; then
 		git remote add upstream https://github.com/$UPSTREAM_REPO.git
