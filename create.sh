@@ -48,8 +48,6 @@ if [ ! -f "$APP_SPEC_PATH" ]; then
 	exit 1
 fi
 
-sed -i -e 's/REPLACE_CARD_JUDGE_GIT_REPO/'"${CARD_JUDGE_GIT_REPO//\//\\/}"'/g' "$APP_SPEC_PATH"
-
 ################################################################################
 # check environment variables
 
@@ -75,7 +73,7 @@ fi
 
 ################################################################################
 # sync fork with upstream if needed
-REPO=$(grep 'repo:' "$APP_SPEC_PATH" | awk '{print $2}')
+REPO="$CARD_JUDGE_GIT_REPO"
 UPSTREAM_REPO="GrantFBarnes/card-judge" # Hardcoded value
 if [[ "$REPO" != "$UPSTREAM_REPO" ]]; then
     echo "Syncing fork $REPO with upstream $UPSTREAM_REPO..."
@@ -216,6 +214,7 @@ sed -i -e 's/REPLACE_CARD_JUDGE_SQL_HOST/'"$DROPLET_IP"'/g' "$APP_SPEC_PATH"
 sed -i -e 's/REPLACE_CARD_JUDGE_SQL_USER/'"$CARD_JUDGE_SQL_USER"'/g' "$APP_SPEC_PATH"
 sed -i -e 's/REPLACE_CARD_JUDGE_SQL_PASSWORD/'"$CARD_JUDGE_SQL_PASSWORD"'/g' "$APP_SPEC_PATH"
 sed -i -e 's/REPLACE_CARD_JUDGE_JWT_SECRET/'"$CARD_JUDGE_JWT_SECRET"'/g' "$APP_SPEC_PATH"
+sed -i -e 's/REPLACE_CARD_JUDGE_GIT_REPO/'"${CARD_JUDGE_GIT_REPO//\//\\/}"'/g' "$APP_SPEC_PATH"
 
 APP_URL=$(
 	doctl apps create \
