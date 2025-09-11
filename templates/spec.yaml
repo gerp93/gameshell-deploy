@@ -30,9 +30,6 @@ services:
   - key: CARD_JUDGE_SQL_DATABASE
     scope: RUN_AND_BUILD_TIME
     value: CARD_JUDGE
-  - key: CARD_JUDGE_JWT_SECRET
-    scope: RUN_AND_BUILD_TIME
-    value: REPLACE_CARD_JUDGE_JWT_SECRET
   github:
     branch: main
     repo: REPLACE_CARD_JUDGE_GIT_REPO
