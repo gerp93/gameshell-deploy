@@ -66,20 +66,19 @@ if [[ -z "$CARD_JUDGE_JWT_SECRET" ]]; then
 	exit 1
 fi
 
+CARD_JUDGE_GIT_UPSTREAM_REPO="GrantFBarnes/card-judge"
 if [[ -z "$CARD_JUDGE_GIT_REPO" ]]; then
-	echo "Environment variable not found: CARD_JUDGE_GIT_REPO"
-	exit 1
+	CARD_JUDGE_GIT_REPO="$CARD_JUDGE_GIT_UPSTREAM_REPO"
 fi
 
 ################################################################################
 # sync fork with upstream if needed
 
-UPSTREAM_REPO="GrantFBarnes/card-judge" # Hardcoded value
-if [[ "$CARD_JUDGE_GIT_REPO" != "$UPSTREAM_REPO" ]]; then
-	echo "Syncing fork $CARD_JUDGE_GIT_REPO with upstream $UPSTREAM_REPO..."
+if [[ "$CARD_JUDGE_GIT_REPO" != "$CARD_JUDGE_GIT_UPSTREAM_REPO" ]]; then
+	echo "Syncing fork $CARD_JUDGE_GIT_REPO with upstream $CARD_JUDGE_GIT_UPSTREAM_REPO..."
 	# Add upstream remote if it doesn't exist
 	if ! git remote | grep -q upstream; then
-		git remote add upstream https://github.com/$UPSTREAM_REPO.git
+		git remote add upstream https://github.com/$CARD_JUDGE_GIT_UPSTREAM_REPO.git
 	fi
 	git fetch upstream
 	COMMITS_TO_PUSH=$(git log origin/main..upstream/main --oneline)
