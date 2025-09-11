@@ -76,28 +76,28 @@ fi
 REPO="$CARD_JUDGE_GIT_REPO"
 UPSTREAM_REPO="GrantFBarnes/card-judge" # Hardcoded value
 if [[ "$REPO" != "$UPSTREAM_REPO" ]]; then
-    echo "Syncing fork $REPO with upstream $UPSTREAM_REPO..."
-    # Add upstream remote if it doesn't exist
-    if ! git remote | grep -q upstream; then
-        git remote add upstream https://github.com/$UPSTREAM_REPO.git
-    fi
-    git fetch upstream
-    COMMITS_TO_PUSH=$(git log origin/main..upstream/main --oneline)
-    if [[ -z "$COMMITS_TO_PUSH" ]]; then
-        echo "No new commits to push from upstream/main to origin/main. Continuing automatically."
-    else
-        echo "The following commits will be pushed from upstream/main to origin/main:"
-        echo "$COMMITS_TO_PUSH"
-        read -p "Do you want to continue with the push? (y/N): " CONFIRM_PUSH
-        if [[ "$CONFIRM_PUSH" =~ ^[Yy]$ ]]; then
-            git push origin upstream/main:main
-        else
-            echo "Push cancelled by user.  Exiting script."
-            exit 1
-        fi
-    fi
+	echo "Syncing fork $REPO with upstream $UPSTREAM_REPO..."
+	# Add upstream remote if it doesn't exist
+	if ! git remote | grep -q upstream; then
+		git remote add upstream https://github.com/$UPSTREAM_REPO.git
+	fi
+	git fetch upstream
+	COMMITS_TO_PUSH=$(git log origin/main..upstream/main --oneline)
+	if [[ -z "$COMMITS_TO_PUSH" ]]; then
+		echo "No new commits to push from upstream/main to origin/main. Continuing automatically."
+	else
+		echo "The following commits will be pushed from upstream/main to origin/main:"
+		echo "$COMMITS_TO_PUSH"
+		read -p "Do you want to continue with the push? (y/N): " CONFIRM_PUSH
+		if [[ "$CONFIRM_PUSH" =~ ^[Yy]$ ]]; then
+			git push origin upstream/main:main
+		else
+			echo "Push cancelled by user.  Exiting script."
+			exit 1
+		fi
+	fi
 else
-    echo "Upstream repo is the same as repo, skipping sync."
+	echo "Upstream repo is the same as repo, skipping sync."
 fi
 
 ################################################################################
