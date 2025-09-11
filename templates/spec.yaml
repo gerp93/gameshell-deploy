@@ -35,7 +35,7 @@ services:
     value: REPLACE_CARD_JUDGE_JWT_SECRET
   github:
     branch: main
-    repo: REPLACE_CARD_JUDGE_GIT_REPO
+    repo: gerp93/card-judge
   http_port: 2016
   instance_count: 1
   instance_size_slug: apps-s-1vcpu-0.5gb
