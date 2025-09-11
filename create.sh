@@ -96,8 +96,6 @@ if [[ "$CARD_JUDGE_GIT_REPO" != "$UPSTREAM_REPO" ]]; then
 			exit 1
 		fi
 	fi
-else
-	echo "Upstream repo is the same as repo, skipping sync."
 fi
 
 ################################################################################
