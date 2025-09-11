@@ -48,6 +48,8 @@ if [ ! -f "$APP_SPEC_PATH" ]; then
 	exit 1
 fi
 
+sed -i -e 's/REPLACE_CARD_JUDGE_GIT_REPO/'"${CARD_JUDGE_GIT_REPO//\//\\/}"'/g' "$APP_SPEC_PATH"
+
 ################################################################################
 # check environment variables
 
@@ -74,7 +76,7 @@ fi
 ################################################################################
 # sync fork with upstream if needed
 REPO=$(grep 'repo:' "$APP_SPEC_PATH" | awk '{print $2}')
-UPSTREAM_REPO=$(grep 'upstream_repo:' "$APP_SPEC_PATH" | awk '{print $2}')
+UPSTREAM_REPO="GrantFBarnes/card-judge" # Hardcoded value
 if [[ "$REPO" != "$UPSTREAM_REPO" ]]; then
     echo "Syncing fork with upstream $UPSTREAM_REPO..."
     # Add upstream remote if it doesn't exist
@@ -104,6 +106,74 @@ if [[ -z "$SSH_KEY_ID" ]]; then
 	echo "SSH Key ID not found"
 	exit 1
 fi
+
+# ################################################################################
+# # create droplet
+
+# echo "----------------------------------------"
+# echo "Creating Droplet..."
+
+# DROPLET_CREATED=false
+# if doctl compute droplet list --format=Name --no-header | grep -q $DROPLET_NAME; then
+#     echo "Droplet already exists"
+#     DROPLET_IP=$(doctl compute droplet list --format=PublicIPv4,Name --no-header | grep $DROPLET_NAME | cut -d ' ' -f 1)
+#     DROPLET_ID=$(doctl compute droplet list --format=ID,Name --no-header | grep $DROPLET_NAME | cut -d ' ' -f 1)
+#     if [[ -z "$DROPLET_IP" || -z "$DROPLET_ID" ]]; then
+#         echo "Could not retrieve existing droplet IP or ID."
+#         exit 1
+#     fi
+#     echo "Skipping droplet setup, using existing droplet."
+# else
+#     sed -i -e 's/REPLACE_CARD_JUDGE_SQL_USER/'"$CARD_JUDGE_SQL_USER"'/g' "$SETUP_SCRIPT_PATH"
+#     sed -i -e 's/REPLACE_CARD_JUDGE_SQL_PASSWORD/'"$CARD_JUDGE_SQL_PASSWORD"'/g' "$SETUP_SCRIPT_PATH"
+#     DROPLET_IP=$(doctl compute droplet create "$DROPLET_NAME" \
+#         --ssh-keys=$SSH_KEY_ID \
+#         --region=nyc3 \
+#         --image=centos-stream-9-x64 \
+#         --size=s-1vcpu-1gb-amd \
+#         --user-data-file="$SETUP_SCRIPT_PATH" \
+#         --format=PublicIPv4 \
+#         --no-header \
+#         --wait)
+#     git checkout -- "$SETUP_SCRIPT_PATH"
+#     if [[ -z "$DROPLET_IP" ]]; then
+#         sleep 10
+#         DROPLET_IP=$(doctl compute droplet list --format=PublicIPv4,Name --no-header | grep $DROPLET_NAME | cut -d ' ' -f 1)
+#         if [[ -z "$DROPLET_IP" ]]; then
+#             echo "Droplet IP not found"
+#             exit 1
+#         fi
+#     fi
+#     DROPLET_ID=$(doctl compute droplet list --format=ID,Name --no-header | grep $DROPLET_NAME | cut -d ' ' -f 1)
+#     if [[ -z "$DROPLET_ID" ]]; then
+#         echo "Droplet ID not found"
+#         exit 1
+#     fi
+#     echo "Droplet Created"
+#     DROPLET_CREATED=true
+# fi
+
+# # finish droplet setup only if droplet was just created
+# if [ "$DROPLET_CREATED" = true ]; then
+#     echo "----------------------------------------"
+#     echo "Finishing Droplet Setup..."
+#     sleep 1m
+#     DONE_CHECKS_REMAINING=15
+#     while ! doctl compute droplet get $DROPLET_ID --format=Status --no-header | grep -q "off"; do
+#         ((DONE_CHECKS_REMAINING--))
+#         if [ "$DONE_CHECKS_REMAINING" -eq 0 ]; then
+#             echo "Droplet never finished setup, deleting droplet..."
+#             doctl compute droplet delete $DROPLET_ID --force
+#             echo "Droplet Deleted"
+#             exit 1
+#         fi
+#         echo "Droplet setup not finished yet, waiting 1 minute..."
+#         sleep 1m
+#     done
+#     doctl compute droplet-action power-on $DROPLET_ID --wait > /dev/null
+#     sleep 15s
+#     echo "Droplet Finished Setup"
+# fi
 
 ################################################################################
 # create droplet
@@ -202,7 +272,6 @@ sed -i -e 's/REPLACE_CARD_JUDGE_SQL_HOST/'"$DROPLET_IP"'/g' "$APP_SPEC_PATH"
 sed -i -e 's/REPLACE_CARD_JUDGE_SQL_USER/'"$CARD_JUDGE_SQL_USER"'/g' "$APP_SPEC_PATH"
 sed -i -e 's/REPLACE_CARD_JUDGE_SQL_PASSWORD/'"$CARD_JUDGE_SQL_PASSWORD"'/g' "$APP_SPEC_PATH"
 sed -i -e 's/REPLACE_CARD_JUDGE_JWT_SECRET/'"$CARD_JUDGE_JWT_SECRET"'/g' "$APP_SPEC_PATH"
-sed -i -e 's/REPLACE_CARD_JUDGE_GIT_REPO/'"${CARD_JUDGE_GIT_REPO//\//\\/}"'/g' "$APP_SPEC_PATH"
 
 APP_URL=$(
 	doctl apps create \
