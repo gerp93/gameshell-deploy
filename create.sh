@@ -127,8 +127,8 @@ DROPLET_IP=$(
 	doctl compute droplet create "$DROPLET_NAME" \
 		--ssh-keys=$SSH_KEY_ID \
 		--region=nyc3 \
-		--image=centos-stream-9-x64 \
-		--size=s-1vcpu-1gb-amd \
+		--image=centos-stream-10-x64 \
+		--size=s-2vcpu-4gb-amd \
 		--user-data-file="$SETUP_SCRIPT_PATH" \
 		--format=PublicIPv4 \
 		--no-header \
