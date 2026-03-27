@@ -95,6 +95,7 @@ fi
 ################################################################################
 # get ssh key
 
+echo "----------------------------------------"
 echo "Which of the following SSH Keys should have access to the database droplet?"
 doctl compute ssh-key list --format=Name --no-header
 read -p "SSH Key Name: " SSH_KEY_NAME
@@ -108,6 +109,34 @@ if [[ -z "$SSH_KEY_ID" ]]; then
 	echo "SSH Key ID not found"
 	exit 1
 fi
+
+################################################################################
+# get price tier
+
+echo "----------------------------------------"
+echo "Choose price tier to host:"
+echo "1) \$17/month, \$0.02518/hour"
+echo "2) \$48/month, \$0.07155/hour"
+echo "3) \$96/month, \$0.14273/hour"
+read -p "Choice: " PRICE_TIER_CHOICE
+case "$PRICE_TIER_CHOICE" in
+    1)
+        DROPLET_SIZE="s-1vcpu-1gb-amd"
+        APP_SIZE="basic-xs"
+        ;;
+    2)
+        DROPLET_SIZE="s-2vcpu-4gb-amd"
+        APP_SIZE="basic-s"
+        ;;
+    3)
+        DROPLET_SIZE="s-4vcpu-8gb-amd"
+        APP_SIZE="basic-m"
+        ;;
+    *)
+        echo "Invalid price tier choice [1|2|3]"
+        exit 1
+        ;;
+esac
 
 ################################################################################
 # create droplet
@@ -128,7 +157,7 @@ DROPLET_IP=$(
 		--ssh-keys=$SSH_KEY_ID \
 		--region=nyc3 \
 		--image=centos-stream-10-x64 \
-		--size=s-2vcpu-4gb-amd \
+		--size="$DROPLET_SIZE" \
 		--user-data-file="$SETUP_SCRIPT_PATH" \
 		--format=PublicIPv4 \
 		--no-header \
@@ -206,6 +235,7 @@ sed -i -e 's/REPLACE_CARD_JUDGE_SQL_HOST/'"$DROPLET_IP"'/g' "$APP_SPEC_PATH"
 sed -i -e 's/REPLACE_CARD_JUDGE_SQL_USER/'"$CARD_JUDGE_SQL_USER"'/g' "$APP_SPEC_PATH"
 sed -i -e 's/REPLACE_CARD_JUDGE_SQL_PASSWORD/'"$CARD_JUDGE_SQL_PASSWORD"'/g' "$APP_SPEC_PATH"
 sed -i -e 's/REPLACE_CARD_JUDGE_GIT_REPO/'"${CARD_JUDGE_GIT_REPO//\//\\/}"'/g' "$APP_SPEC_PATH"
+sed -i -e 's/REPLACE_APP_SIZE/'"$APP_SIZE"'/g' "$APP_SPEC_PATH"
 
 APP_URL=$(
 	doctl apps create \
