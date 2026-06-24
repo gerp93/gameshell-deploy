@@ -207,6 +207,18 @@ done
 doctl compute droplet-action power-on $DROPLET_ID --wait > /dev/null
 sleep 15s
 
+echo "Waiting for SSH to become available..."
+SSH_WAIT_REMAINING=20
+until ssh -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=no root@"$DROPLET_IP" true; do
+    ((SSH_WAIT_REMAINING--))
+    if [ "$SSH_WAIT_REMAINING" -le 0 ]; then
+        echo "SSH did not become available within expected time."
+        exit 1
+    fi
+    echo "SSH not ready yet, waiting 15 seconds..."
+    sleep 15s
+done
+
 echo "Droplet Finished Setup"
 
 ################################################################################
