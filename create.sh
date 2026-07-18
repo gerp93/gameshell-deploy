@@ -1,95 +1,116 @@
 #!/usr/bin/env bash
 ################################################################################
-# Create instance of Card Judge in Digital Ocean
+# Create a Digital Ocean instance of a gameshell-framework game.
+#
+# Usage:  ./create.sh [GAME_REPO_DIR]
+#   GAME_REPO_DIR defaults to the current directory. It must contain a
+#   deploy.conf (see examples/deploy.conf) and a backups/ directory holding at
+#   least one GPG-encrypted database backup (*.sql.gpg).
+#
+# Operator secrets come from the environment (game-agnostic):
+#   DEPLOY_SQL_USER      database user to create on the droplet
+#   DEPLOY_SQL_PASSWORD  password for that user
 ################################################################################
 
 set -e # exit on any command error
 
-cd "$(dirname "$0")"
+OPS_DIR="$(cd "$(dirname "$0")" && pwd)"
 
-APP_NAME="card-judge"
+GAME_REPO_DIR="${1:-$PWD}"
+GAME_REPO_DIR="$(cd "$GAME_REPO_DIR" && pwd)"
+
+################################################################################
+# load per-game config
+
+CONFIG_PATH="$GAME_REPO_DIR/deploy.conf"
+if [ ! -f "$CONFIG_PATH" ]; then
+	echo "Config not found: $CONFIG_PATH"
+	exit 1
+fi
+# shellcheck disable=SC1090
+source "$CONFIG_PATH"
+
+: "${APP_NAME:?deploy.conf must set APP_NAME}"
+: "${ENV_PREFIX:?deploy.conf must set ENV_PREFIX}"
+: "${DB_NAME:?deploy.conf must set DB_NAME}"
+: "${HTTP_PORT:?deploy.conf must set HTTP_PORT}"
+: "${GIT_REPO:?deploy.conf must set GIT_REPO}"
+
+DROPLET_REGION="${DROPLET_REGION:-nyc3}"
+DROPLET_IMAGE="${DROPLET_IMAGE:-centos-stream-10-x64}"
 DROPLET_NAME="$APP_NAME-database"
+
+################################################################################
+# check operator secrets
+
+if [[ -z "$DEPLOY_SQL_USER" ]]; then
+	echo "Environment variable not found: DEPLOY_SQL_USER"
+	exit 1
+fi
+
+if [[ -z "$DEPLOY_SQL_PASSWORD" ]]; then
+	echo "Environment variable not found: DEPLOY_SQL_PASSWORD"
+	exit 1
+fi
 
 ################################################################################
 # get latest database backup
 
-cd backups
-
-BACKUP_GPG_FILE=$(ls *.gpg | tail -n 1)
-BACKUP_GPG_PATH="$(pwd)/$BACKUP_GPG_FILE"
-if [ ! -f "$BACKUP_GPG_PATH" ]; then
-	echo "File not found: $BACKUP_GPG_PATH"
+BACKUP_DIR="$GAME_REPO_DIR/backups"
+BACKUP_GPG_FILE=$(ls "$BACKUP_DIR"/*.gpg 2>/dev/null | tail -n 1 || true)
+if [[ -z "$BACKUP_GPG_FILE" ]]; then
+	echo "No *.gpg backup found in: $BACKUP_DIR"
 	exit 1
 fi
 
-BACKUP_SQL_PATH="${BACKUP_GPG_PATH::-4}"
-rm -f $BACKUP_SQL_PATH
-gpg -d --output $BACKUP_SQL_PATH $BACKUP_GPG_PATH
-
-cd ..
-
-################################################################################
-# check expected files
+BACKUP_SQL_PATH="${BACKUP_GPG_FILE::-4}"
+rm -f "$BACKUP_SQL_PATH"
+gpg -d --output "$BACKUP_SQL_PATH" "$BACKUP_GPG_FILE"
 
 if [ ! -f "$BACKUP_SQL_PATH" ]; then
 	echo "File not found: $BACKUP_SQL_PATH"
 	exit 1
 fi
 
-SETUP_SCRIPT_PATH="$(pwd)/templates/setup.sh"
-if [ ! -f "$SETUP_SCRIPT_PATH" ]; then
-	echo "File not found: $SETUP_SCRIPT_PATH"
-	exit 1
-fi
+################################################################################
+# render templates into temp copies (tracked templates are never mutated)
 
-APP_SPEC_PATH="$(pwd)/templates/spec.yaml"
-if [ ! -f "$APP_SPEC_PATH" ]; then
-	echo "File not found: $APP_SPEC_PATH"
-	exit 1
-fi
+SETUP_SCRIPT_PATH=$(mktemp)
+APP_SPEC_PATH=$(mktemp)
+trap 'rm -f "$SETUP_SCRIPT_PATH" "$APP_SPEC_PATH"' EXIT
+
+sed \
+	-e "s/REPLACE_SQL_USER/${DEPLOY_SQL_USER}/g" \
+	-e "s/REPLACE_SQL_PASSWORD/${DEPLOY_SQL_PASSWORD}/g" \
+	-e "s/REPLACE_DB_NAME/${DB_NAME}/g" \
+	"$OPS_DIR/templates/setup.sh" > "$SETUP_SCRIPT_PATH"
 
 ################################################################################
-# check environment variables
+# sync fork with upstream if configured
 
-if [[ -z "$CARD_JUDGE_SQL_USER" ]]; then
-	echo "Environment variable not found: CARD_JUDGE_SQL_USER"
-	exit 1
-fi
-
-if [[ -z "$CARD_JUDGE_SQL_PASSWORD" ]]; then
-	echo "Environment variable not found: CARD_JUDGE_SQL_PASSWORD"
-	exit 1
-fi
-
-CARD_JUDGE_GIT_UPSTREAM_REPO="GrantFBarnes/card-judge"
-if [[ -z "$CARD_JUDGE_GIT_REPO" ]]; then
-	CARD_JUDGE_GIT_REPO="$CARD_JUDGE_GIT_UPSTREAM_REPO"
-fi
-
-################################################################################
-# sync fork with upstream if needed
-
-if [[ "$CARD_JUDGE_GIT_REPO" != "$CARD_JUDGE_GIT_UPSTREAM_REPO" ]]; then
-	echo "Syncing fork $CARD_JUDGE_GIT_REPO with upstream $CARD_JUDGE_GIT_UPSTREAM_REPO..."
-	# Add upstream remote if it doesn't exist
-	if ! git remote | grep -q upstream; then
-		git remote add upstream https://github.com/$CARD_JUDGE_GIT_UPSTREAM_REPO.git
-	fi
-	git fetch upstream
-	COMMITS_TO_PUSH=$(git log origin/main..upstream/main --oneline)
-	if [[ -z "$COMMITS_TO_PUSH" ]]; then
-		echo "No new commits to push from upstream/main to origin/main. Continuing automatically."
-	else
-		echo "The following commits will be pushed from upstream/main to origin/main:"
-		echo "$COMMITS_TO_PUSH"
-		read -p "Do you want to continue with the push? (y/N): " CONFIRM_PUSH
-		if [[ "$CONFIRM_PUSH" =~ ^[Yy]$ ]]; then
-			git push origin upstream/main:main
-		else
-			echo "Push cancelled by user.  Exiting script."
-			exit 1
+if [[ -n "$GIT_UPSTREAM" && "$GIT_UPSTREAM" != "$GIT_REPO" ]]; then
+	echo "Syncing fork $GIT_REPO with upstream $GIT_UPSTREAM..."
+	(
+		cd "$GAME_REPO_DIR"
+		if ! git remote | grep -q upstream; then
+			git remote add upstream "https://github.com/$GIT_UPSTREAM.git"
 		fi
-	fi
+		git fetch upstream
+		COMMITS_TO_PUSH=$(git log origin/main..upstream/main --oneline)
+		if [[ -z "$COMMITS_TO_PUSH" ]]; then
+			echo "No new commits to push from upstream/main to origin/main. Continuing automatically."
+		else
+			echo "The following commits will be pushed from upstream/main to origin/main:"
+			echo "$COMMITS_TO_PUSH"
+			read -p "Do you want to continue with the push? (y/N): " CONFIRM_PUSH
+			if [[ "$CONFIRM_PUSH" =~ ^[Yy]$ ]]; then
+				git push origin upstream/main:main
+			else
+				echo "Push cancelled by user. Exiting script."
+				exit 1
+			fi
+		fi
+	)
 fi
 
 ################################################################################
@@ -104,7 +125,7 @@ if [[ -z "$SSH_KEY_NAME" ]]; then
 	exit 1
 fi
 
-SSH_KEY_ID=$(doctl compute ssh-key list --format=ID,Name --no-header | grep $SSH_KEY_NAME | cut -d ' ' -f 1)
+SSH_KEY_ID=$(doctl compute ssh-key list --format=ID,Name --no-header | grep "$SSH_KEY_NAME" | cut -d ' ' -f 1)
 if [[ -z "$SSH_KEY_ID" ]]; then
 	echo "SSH Key ID not found"
 	exit 1
@@ -120,22 +141,22 @@ echo "2) \$48/month, \$0.07155/hour"
 echo "3) \$96/month, \$0.14273/hour"
 read -p "Choice: " PRICE_TIER_CHOICE
 case "$PRICE_TIER_CHOICE" in
-    1)
-        DROPLET_SIZE="s-1vcpu-1gb-amd"
-        APP_SIZE="basic-xs"
-        ;;
-    2)
-        DROPLET_SIZE="s-2vcpu-4gb-amd"
-        APP_SIZE="basic-s"
-        ;;
-    3)
-        DROPLET_SIZE="s-4vcpu-8gb-amd"
-        APP_SIZE="basic-m"
-        ;;
-    *)
-        echo "Invalid price tier choice [1|2|3]"
-        exit 1
-        ;;
+	1)
+		DROPLET_SIZE="s-1vcpu-1gb-amd"
+		APP_SIZE="basic-xs"
+		;;
+	2)
+		DROPLET_SIZE="s-2vcpu-4gb-amd"
+		APP_SIZE="basic-s"
+		;;
+	3)
+		DROPLET_SIZE="s-4vcpu-8gb-amd"
+		APP_SIZE="basic-m"
+		;;
+	*)
+		echo "Invalid price tier choice [1|2|3]"
+		exit 1
+		;;
 esac
 
 ################################################################################
@@ -144,19 +165,16 @@ esac
 echo "----------------------------------------"
 echo "Creating Droplet..."
 
-if doctl compute droplet list --format=Name --no-header | grep -q $DROPLET_NAME; then
+if doctl compute droplet list --format=Name --no-header | grep -q "$DROPLET_NAME"; then
 	echo "Droplet already exists"
 	exit 1
 fi
 
-sed -i -e 's/REPLACE_CARD_JUDGE_SQL_USER/'"$CARD_JUDGE_SQL_USER"'/g' "$SETUP_SCRIPT_PATH"
-sed -i -e 's/REPLACE_CARD_JUDGE_SQL_PASSWORD/'"$CARD_JUDGE_SQL_PASSWORD"'/g' "$SETUP_SCRIPT_PATH"
-
 DROPLET_IP=$(
 	doctl compute droplet create "$DROPLET_NAME" \
-		--ssh-keys=$SSH_KEY_ID \
-		--region=nyc3 \
-		--image=centos-stream-10-x64 \
+		--ssh-keys="$SSH_KEY_ID" \
+		--region="$DROPLET_REGION" \
+		--image="$DROPLET_IMAGE" \
 		--size="$DROPLET_SIZE" \
 		--user-data-file="$SETUP_SCRIPT_PATH" \
 		--format=PublicIPv4 \
@@ -164,18 +182,16 @@ DROPLET_IP=$(
 		--wait
 )
 
-git checkout -- "$SETUP_SCRIPT_PATH"
-
 if [[ -z "$DROPLET_IP" ]]; then
 	sleep 10
-	DROPLET_IP=$(doctl compute droplet list --format=PublicIPv4,Name --no-header | grep $DROPLET_NAME | cut -d ' ' -f 1)
+	DROPLET_IP=$(doctl compute droplet list --format=PublicIPv4,Name --no-header | grep "$DROPLET_NAME" | cut -d ' ' -f 1)
 	if [[ -z "$DROPLET_IP" ]]; then
 		echo "Droplet IP not found"
 		exit 1
 	fi
 fi
 
-DROPLET_ID=$(doctl compute droplet list --format=ID,Name --no-header | grep $DROPLET_NAME | cut -d ' ' -f 1)
+DROPLET_ID=$(doctl compute droplet list --format=ID,Name --no-header | grep "$DROPLET_NAME" | cut -d ' ' -f 1)
 if [[ -z "$DROPLET_ID" ]]; then
 	echo "Droplet ID not found"
 	exit 1
@@ -192,11 +208,11 @@ echo "Finishing Droplet Setup..."
 sleep 1m
 
 DONE_CHECKS_REMAINING=15
-while ! doctl compute droplet get $DROPLET_ID --format=Status --no-header | grep -q "off"; do
+while ! doctl compute droplet get "$DROPLET_ID" --format=Status --no-header | grep -q "off"; do
 	((DONE_CHECKS_REMAINING--))
 	if [ "$DONE_CHECKS_REMAINING" -eq 0 ]; then
 		echo "Droplet never finished setup, deleting droplet..."
-		doctl compute droplet delete $DROPLET_ID --force
+		doctl compute droplet delete "$DROPLET_ID" --force
 		echo "Droplet Deleted"
 		exit 1
 	fi
@@ -204,19 +220,19 @@ while ! doctl compute droplet get $DROPLET_ID --format=Status --no-header | grep
 	sleep 1m
 done
 
-doctl compute droplet-action power-on $DROPLET_ID --wait > /dev/null
+doctl compute droplet-action power-on "$DROPLET_ID" --wait > /dev/null
 sleep 15s
 
 echo "Waiting for SSH to become available..."
 SSH_WAIT_REMAINING=20
 until ssh -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=no root@"$DROPLET_IP" true; do
-    ((SSH_WAIT_REMAINING--))
-    if [ "$SSH_WAIT_REMAINING" -le 0 ]; then
-        echo "SSH did not become available within expected time."
-        exit 1
-    fi
-    echo "SSH not ready yet, waiting 15 seconds..."
-    sleep 15s
+	((SSH_WAIT_REMAINING--))
+	if [ "$SSH_WAIT_REMAINING" -le 0 ]; then
+		echo "SSH did not become available within expected time."
+		exit 1
+	fi
+	echo "SSH not ready yet, waiting 15 seconds..."
+	sleep 15s
 done
 
 echo "Droplet Finished Setup"
@@ -227,8 +243,8 @@ echo "Droplet Finished Setup"
 echo "----------------------------------------"
 echo "Restoring Database..."
 
-scp -o StrictHostKeyChecking=no "$BACKUP_SQL_PATH" root@$DROPLET_IP:/root/restore.sql >/dev/null 2>&1
-ssh root@$DROPLET_IP 'mariadb CARD_JUDGE < /root/restore.sql'
+scp -o StrictHostKeyChecking=no "$BACKUP_SQL_PATH" root@"$DROPLET_IP":/root/restore.sql >/dev/null 2>&1
+ssh root@"$DROPLET_IP" "mariadb $DB_NAME < /root/restore.sql"
 
 echo "Database Restored"
 
@@ -237,17 +253,22 @@ echo "Database Restored"
 
 echo "----------------------------------------"
 
-if doctl apps list --format=Spec.Name --no-header | grep -q $APP_NAME; then
+if doctl apps list --format=Spec.Name --no-header | grep -q "$APP_NAME"; then
 	echo "App already exists"
 	exit 1
 fi
 
-sed -i -e 's/REPLACE_APP_NAME/'"$APP_NAME"'/g' "$APP_SPEC_PATH"
-sed -i -e 's/REPLACE_CARD_JUDGE_SQL_HOST/'"$DROPLET_IP"'/g' "$APP_SPEC_PATH"
-sed -i -e 's/REPLACE_CARD_JUDGE_SQL_USER/'"$CARD_JUDGE_SQL_USER"'/g' "$APP_SPEC_PATH"
-sed -i -e 's/REPLACE_CARD_JUDGE_SQL_PASSWORD/'"$CARD_JUDGE_SQL_PASSWORD"'/g' "$APP_SPEC_PATH"
-sed -i -e 's/REPLACE_CARD_JUDGE_GIT_REPO/'"${CARD_JUDGE_GIT_REPO//\//\\/}"'/g' "$APP_SPEC_PATH"
-sed -i -e 's/REPLACE_APP_SIZE/'"$APP_SIZE"'/g' "$APP_SPEC_PATH"
+sed \
+	-e "s/REPLACE_APP_NAME/${APP_NAME}/g" \
+	-e "s/REPLACE_ENV_PREFIX/${ENV_PREFIX}/g" \
+	-e "s/REPLACE_SQL_HOST/${DROPLET_IP}/g" \
+	-e "s/REPLACE_SQL_USER/${DEPLOY_SQL_USER}/g" \
+	-e "s/REPLACE_SQL_PASSWORD/${DEPLOY_SQL_PASSWORD}/g" \
+	-e "s/REPLACE_DB_NAME/${DB_NAME}/g" \
+	-e "s/REPLACE_HTTP_PORT/${HTTP_PORT}/g" \
+	-e "s/REPLACE_APP_SIZE/${APP_SIZE}/g" \
+	-e "s|REPLACE_GIT_REPO|${GIT_REPO}|g" \
+	"$OPS_DIR/templates/spec.yaml" > "$APP_SPEC_PATH"
 
 APP_URL=$(
 	doctl apps create \
@@ -257,11 +278,9 @@ APP_URL=$(
 		--wait
 )
 
-git checkout -- "$APP_SPEC_PATH"
-
 if [[ -z "$APP_URL" ]]; then
 	sleep 10
-	APP_URL=$(doctl apps list --format=DefaultIngress,Spec.Name --no-header | grep $APP_NAME | cut -d ' ' -f 1)
+	APP_URL=$(doctl apps list --format=DefaultIngress,Spec.Name --no-header | grep "$APP_NAME" | cut -d ' ' -f 1)
 	if [[ -z "$APP_URL" ]]; then
 		echo "App URL not found"
 		exit 1

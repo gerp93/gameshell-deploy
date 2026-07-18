@@ -1,0 +1,2 @@
+# decrypted backups should never be committed anywhere
+*.sql
