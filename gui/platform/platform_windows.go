@@ -13,31 +13,19 @@ const isWindows = true
 // wslPathTranslate converts a Windows path to its WSL equivalent via
 // `wsl.exe wslpath -a`, rather than hand-rolling a C:\ -> /mnt/c/
 // substitution, which breaks on non-default drive mounts.
+//
+// Every wsl.exe call in this file passes -e (--exec): without it, wsl.exe
+// joins argv into one string and re-parses it through the distro's default
+// shell before running it, which silently eats backslashes in any argument
+// (backslash-before-letter is just a shell escape) — so a Windows path like
+// C:\Users\... arrives on the Linux side as "C:Users...". -e runs the given
+// argv directly, no shell re-parsing, so backslashes survive intact.
 func wslPathTranslate(winPath string) (string, error) {
-	out, err := exec.Command("wsl.exe", "wslpath", "-a", winPath).Output()
+	out, err := exec.Command("wsl.exe", "-e", "wslpath", "-a", winPath).Output()
 	if err != nil {
 		return "", fmt.Errorf("wslpath translation failed for %q: %w", winPath, err)
 	}
 	return strings.TrimSpace(string(out)), nil
-}
-
-// translatePathArgs converts every non-flag argument (i.e. not starting
-// with "-") to its WSL path equivalent; flag args like --tier=1 are passed
-// through unchanged since their values are never filesystem paths.
-func translatePathArgs(args []string) ([]string, error) {
-	out := make([]string, len(args))
-	for i, a := range args {
-		if strings.HasPrefix(a, "-") {
-			out[i] = a
-			continue
-		}
-		translated, err := wslPathTranslate(a)
-		if err != nil {
-			return nil, err
-		}
-		out[i] = translated
-	}
-	return out, nil
 }
 
 func scriptCommand(scriptPath string, args []string, env []string) (Cmd, error) {
@@ -45,10 +33,9 @@ func scriptCommand(scriptPath string, args []string, env []string) (Cmd, error) 
 	if err != nil {
 		return nil, err
 	}
-	wslArgs, err := translatePathArgs(args)
-	if err != nil {
-		return nil, err
-	}
+
+	// args are create.sh/delete.sh's APP_NAME positional arg plus flags
+	// like --tier=1 — never filesystem paths, so no translation needed.
 
 	// Env vars don't cross the WSL process boundary automatically, so pass
 	// them as a leading `env KEY=VAL` argv prefix to the inner bash call —
@@ -60,22 +47,22 @@ func scriptCommand(scriptPath string, args []string, env []string) (Cmd, error) 
 		cmdArgs = append(cmdArgs, env...)
 	}
 	cmdArgs = append(cmdArgs, "bash", wslScriptPath)
-	cmdArgs = append(cmdArgs, wslArgs...)
+	cmdArgs = append(cmdArgs, args...)
 
-	cmd := exec.Command("wsl.exe", cmdArgs...)
+	cmd := exec.Command("wsl.exe", append([]string{"-e"}, cmdArgs...)...)
 	cmd.Stdin = nil
 	return cmd, nil
 }
 
 func rawCommand(name string, args []string) (Cmd, error) {
-	cmdArgs := append([]string{name}, args...)
+	cmdArgs := append([]string{"-e", name}, args...)
 	cmd := exec.Command("wsl.exe", cmdArgs...)
 	cmd.Stdin = nil
 	return cmd, nil
 }
 
 func lookPath(name string) bool {
-	err := exec.Command("wsl.exe", "which", name).Run()
+	err := exec.Command("wsl.exe", "-e", "which", name).Run()
 	return err == nil
 }
 
@@ -84,4 +71,12 @@ func wslAvailable() bool {
 		return false
 	}
 	return exec.Command("wsl.exe", "--status").Run() == nil
+}
+
+// openFolder runs directly on Windows (not through wsl.exe) since path is
+// already a native Windows path. explorer.exe often exits non-zero even on
+// a successful open, so this only reports a launch failure, not its exit
+// code.
+func openFolder(path string) error {
+	return exec.Command("explorer.exe", path).Start()
 }

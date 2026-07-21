@@ -1,6 +1,10 @@
 # decrypted backups should never be committed anywhere
 *.sql
 
+# games/APP_NAME/backups/ holds operator-local database dumps (encrypted
+# and decrypted alike) — only games/APP_NAME/deploy.conf is tracked
+games/*/backups/
+
 # gui/ (Wails app) build artifacts and generated bindings
 gui/frontend/dist/
 gui/frontend/node_modules/

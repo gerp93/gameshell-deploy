@@ -65,7 +65,11 @@ func checkDoctlAuthenticated() CheckResult {
 	if !platform.LookPath("doctl") {
 		return CheckResult{Name: "doctl auth", OK: false, Detail: "doctl isn't installed yet."}
 	}
-	cmd, err := platform.RawCommand("doctl", []string{"account", "get"})
+	// Uses "apps list" rather than "account get" — this tool never reads
+	// account info, only apps/droplets/ssh-keys, so a scoped token with
+	// just those scopes (and no account:read) would otherwise fail this
+	// check despite working fine for every real operation it performs.
+	cmd, err := platform.RawCommand("doctl", []string{"apps", "list", "--format=ID", "--no-header"})
 	if err != nil {
 		return CheckResult{Name: "doctl auth", OK: false, Detail: err.Error()}
 	}

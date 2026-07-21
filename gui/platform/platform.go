@@ -42,3 +42,10 @@ func IsWindows() bool {
 func WSLAvailable() bool {
 	return wslAvailable()
 }
+
+// OpenFolder opens path in the host's file manager (Explorer/Finder/xdg-open)
+// — never through wsl.exe, since path is already a host-native path (this
+// GUI, and the paths it deals with, always run on the host, not inside WSL).
+func OpenFolder(path string) error {
+	return openFolder(path)
+}

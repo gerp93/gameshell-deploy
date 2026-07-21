@@ -1,5 +1,5 @@
-// Package settings persists the operator's chosen ops-repo/game-repo paths
-// to a config file outside the repo tree — never any secrets.
+// Package settings persists the operator's last selected app name and UI
+// theme to a config file outside the repo tree — never any secrets.
 package settings
 
 import (
@@ -10,8 +10,10 @@ import (
 
 // Settings holds the non-secret preferences remembered between runs.
 type Settings struct {
-	OpsDir          string `json:"opsDir"`
-	LastGameRepoDir string `json:"lastGameRepoDir"`
+	LastAppName string `json:"lastAppName"`
+	// Theme is a data-theme slug (see frontend/src/themes.css), or "" for
+	// the default light/dark palette that follows the OS preference.
+	Theme string `json:"theme"`
 }
 
 func path() (string, error) {

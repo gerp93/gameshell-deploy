@@ -9,17 +9,19 @@ new styles, formatters, or abstractions.
 Shared deployment tooling for [gameshell-framework](https://github.com/gerp93/gameshell-framework)
 games (currently [card-judge](https://github.com/gerp93/card-judge) and
 [timeline-trivia](https://github.com/gerp93/timeline-trivia)). It is a
-**control plane, not a library**: you run its scripts from a checkout of this
-repo and point them at a game repo checkout. There is no Go/JS/etc. code here
-— just bash scripts, a couple of templates, and docs.
+**control plane and artifact store**: you run its scripts from a checkout of
+this repo, passing an app name (`./create.sh APP_NAME`); config and backups
+for every game live in this repo too, under `games/APP_NAME/`. There is no
+Go/JS/etc. code here besides `gui/` (see below) — just bash scripts, a
+couple of templates, and docs.
 
 **Exception:** `gui/` contains a self-contained Wails (Go) desktop app that wraps
 `create.sh`/`delete.sh` for operators who prefer a GUI to the CLI — it is the one
 place in this repo with non-bash code, has its own `go.mod`, and follows normal
 Go/Wails conventions rather than the bash conventions below. It only adds
 non-interactive flags to `create.sh`/`delete.sh` (see their headers); it never
-hardcodes game-specific values and never changes the process/config/data
-split — `deploy.conf` still lives in the game repo, not here.
+hardcodes game-specific values, and it drives the scripts the same way the CLI
+does — by app name, reading/writing `games/APP_NAME/deploy.conf`.
 
 Target platform: **Digital Ocean** (`doctl` for both a MariaDB droplet and a
 DO App Platform app), driven from a **Linux/macOS shell** (`bash`). GPG
@@ -27,28 +29,47 @@ encrypts database backups at rest.
 
 ## The process/config/data split (must not blur)
 
-- **Process** (this repo): `create.sh`, `delete.sh`, `templates/setup.sh`,
-  `templates/spec.yaml`. Fully generic — **no game names, no game-specific
-  values, ever**. If you catch yourself hardcoding a game's name, env prefix,
-  or port here, that value belongs in `deploy.conf` instead.
-- **Config** (each game repo, not here): a `deploy.conf` at the game repo
-  root, copied from [examples/deploy.conf](examples/deploy.conf) — `APP_NAME`,
+- **Process** (this repo, generic): `create.sh`, `delete.sh`,
+  `templates/setup.sh`, `templates/spec.yaml`. Fully generic — **no game
+  names, no game-specific values, ever**. If you catch yourself hardcoding a
+  game's name, env prefix, or port in these files, that value belongs in
+  `games/APP_NAME/deploy.conf` instead.
+- **Config** (this repo, per-game, tracked): `games/APP_NAME/deploy.conf`,
+  copied from [examples/deploy.conf](examples/deploy.conf) — `APP_NAME`,
   `ENV_PREFIX`, `DB_NAME`, `HTTP_PORT`, `GIT_REPO`, optional `GIT_UPSTREAM`/
-  droplet overrides. Only non-secret values live in `deploy.conf`.
-- **Data** (each game repo, not here): a `backups/` directory of
-  GPG-encrypted database dumps (`*.sql.gpg`). Decrypted `*.sql` files are
-  git-ignored in both this repo and every game repo — never commit one.
+  droplet overrides. Only non-secret values live in `deploy.conf`, so it's
+  safe to commit.
+- **Data** (this repo, per-game, git-ignored): `games/APP_NAME/backups/`, a
+  directory of GPG-encrypted database dumps (`*.sql.gpg`). The whole
+  `backups/` directory is git-ignored (`games/*/backups/` in
+  `.gitignore`) — encrypted dumps included, not just decrypted `*.sql` —
+  because backups are operator-local working data, not shared tooling.
+  Never commit a decrypted `*.sql` file regardless.
 - **Secrets** come from the operator's environment, never from a file:
   `DEPLOY_SQL_USER` / `DEPLOY_SQL_PASSWORD` (used to create the MariaDB user
-  on the droplet). Game-repo secrets like `CARD_JUDGE_SQL_PASSWORD` are
+  on the droplet). Per-game secrets like `CARD_JUDGE_SQL_PASSWORD` are
   runtime env vars on the DO App, injected by `create.sh` from the operator's
   `DEPLOY_SQL_*` values — never written to a tracked file.
+- **`GPG_PASSPHRASE`** (optional operator secret): backups are symmetric
+  `gpg -c`/`gpg -d`, which normally prompts interactively via pinentry — fine
+  for CLI use, but the GUI has no TTY for that. When set, `create.sh`/
+  `delete.sh` pass it to gpg via `--batch --passphrase-fd` (never argv, never
+  a file) instead of prompting; unset, both fall back to the interactive
+  prompt exactly as before. Don't reintroduce a bare `gpg -c`/`gpg -d` call
+  without this branch — it's the only thing keeping the GUI's fully
+  non-interactive flow working.
 
 `ENV_PREFIX` is the one value that has to match across repos: the game reads
 its DB settings via `database.SetEnvPrefix(ENV_PREFIX)` in its own `main.go`
 (gameshell-framework convention), and `create.sh` injects the DO app's env
 vars using that same prefix (`${ENV_PREFIX}_SQL_HOST`, `_SQL_USER`, etc.).
 Changing a game's `ENV_PREFIX` is a two-repo change.
+
+`GIT_REPO`/`GIT_UPSTREAM` in `deploy.conf` are enough on their own to deploy
+and fork-sync a game — DO App Platform clones `GIT_REPO` directly, and
+`create.sh`'s fork-sync step fetches both remotes by URL into a throwaway
+git dir. Neither needs a local checkout of the game repo anywhere in this
+flow.
 
 ## Bash conventions (match these exactly)
 

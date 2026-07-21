@@ -5,6 +5,7 @@ package platform
 import (
 	"os"
 	"os/exec"
+	"runtime"
 )
 
 const isWindows = false
@@ -30,4 +31,12 @@ func lookPath(name string) bool {
 
 func wslAvailable() bool {
 	return true
+}
+
+func openFolder(path string) error {
+	opener := "xdg-open"
+	if runtime.GOOS == "darwin" {
+		opener = "open"
+	}
+	return exec.Command(opener, path).Start()
 }

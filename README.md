@@ -2,19 +2,21 @@
 
 Shared deployment tooling for [gameshell-framework](https://github.com/gerp93/gameshell-framework)
 games. One source of truth for the create/restore and backup/delete process;
-each game repo contributes only its own config and database backups.
+all game configs and backups live in this repo, decoupled from application code.
 
 ## Model
 
-This repo is a **control plane**: you run its scripts and point them at a game
-repo. The generic process lives here; the per-game values live in the game repo.
+This repo is a **control plane and artifact store**: it holds the deployment
+scripts, templates, and all per-game configuration and backup data. The generic
+process lives here; nothing game-specific lives in the application repos.
 
 - **Process** (here): `create.sh`, `delete.sh`, and the `templates/`
   (`spec.yaml`, `setup.sh`). No game names or game-specific values.
-- **Config** (in each game repo): a `deploy.conf` at the repo root — app name,
-  env prefix, DB name, port, git repo. See [examples/deploy.conf](examples/deploy.conf).
-- **Data** (in each game repo): a `backups/` directory of GPG-encrypted database
-  dumps (`*.sql.gpg`).
+- **Config** (here): `games/{APP_NAME}/deploy.conf` — app name, env prefix, DB
+  name, port, git repo. See [examples/deploy.conf](examples/deploy.conf).
+- **Data** (here): `games/{APP_NAME}/backups/` directory of GPG-encrypted
+  database dumps (`*.sql.gpg`). Backups are optional; if none exist, a fresh
+  database is created and the app initializes the schema on startup.
 
 ## Prerequisites
 
@@ -25,28 +27,39 @@ repo. The generic process lives here; the per-game values live in the game repo.
 
 ## Usage
 
-Each game repo needs a `deploy.conf` (copy from `examples/deploy.conf`) and a
-`backups/` directory. Database credentials are passed via the environment so one
-operator setup works for any game:
+Database credentials are passed via the environment so one operator setup works for any game:
 
 ```bash
 export DEPLOY_SQL_USER=...
 export DEPLOY_SQL_PASSWORD=...
 
-# create (restores the latest backups/*.sql.gpg)
-./create.sh /path/to/card-timeline
+# create (restores the latest games/APP_NAME/backups/*.sql.gpg)
+./create.sh timeline-trivia
+./create.sh card-judge
 
 # back up and tear down
-./delete.sh /path/to/card-timeline
+./delete.sh timeline-trivia
+./delete.sh card-judge
 ```
 
-If `GAME_REPO_DIR` is omitted it defaults to the current directory, so you can
-also run these from inside a game repo:
+Just pass the app name; config and backups are read from `games/{APP_NAME}/`.
 
-```bash
-cd /path/to/card-timeline
-/path/to/gameshell-deploy/create.sh
-```
+Restoring/creating a backup decrypts/encrypts it with `gpg`, which normally
+prompts interactively for the passphrase — fine in a terminal. To run
+non-interactively (e.g. from a GUI wrapper with no TTY for pinentry), set
+`GPG_PASSPHRASE` too; both scripts then use `gpg --batch --passphrase-fd`
+instead of prompting.
+
+Both scripts also accept flags so GUI wrappers can drive them
+non-interactively — `create.sh` takes `--ssh-key=NAME`, `--tier=1|2|3`, and
+`--yes` (auto-confirms the fork-sync push); `delete.sh` takes
+`--backup=yes|no`. Omit any of them and the matching interactive prompt runs
+as normal.
+
+If `deploy.conf` sets `GIT_UPSTREAM` (a fork's upstream repo, `owner/name`),
+`create.sh` checks it for commits not yet in `GIT_REPO` and offers to push
+them across before deploying — no local checkout of either repo is needed,
+it fetches both directly by URL.
 
 ## How env vars line up
 
@@ -60,7 +73,9 @@ injects DO app env vars with matching keys — `${ENV_PREFIX}_SQL_HOST`,
 
 - The tracked templates are never mutated; `create.sh` renders them into temp
   files per run.
-- Decrypted `*.sql` backups are git-ignored here and should be in game repos too.
+- Decrypted `*.sql` backups are git-ignored; `games/*/backups/` is git-ignored
+  entirely (encrypted `*.sql.gpg` included) — only `games/*/deploy.conf` is
+  tracked.
 - Version numbers are tracked per game (each repo keeps its own
   `version_bump.sh` and README version line) — versioning is intentionally not
   centralized here.

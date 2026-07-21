@@ -2,20 +2,26 @@
 ################################################################################
 # Create a Digital Ocean instance of a gameshell-framework game.
 #
-# Usage:  ./create.sh [GAME_REPO_DIR] [--ssh-key=NAME] [--tier=1|2|3] [--yes]
-#   GAME_REPO_DIR defaults to the current directory. It must contain a
-#   deploy.conf (see examples/deploy.conf) and a backups/ directory holding at
-#   least one GPG-encrypted database backup (*.sql.gpg).
+# Usage:  ./create.sh APP_NAME [--ssh-key=NAME] [--tier=1|2|3] [--yes]
+#   APP_NAME is the game name (e.g., timeline-trivia, card-judge). Config and
+#   backups are read from games/APP_NAME/ relative to this script — deploy.conf
+#   (see examples/deploy.conf) and a backups/ directory holding at least one
+#   GPG-encrypted database backup (*.sql.gpg).
 #
 #   --ssh-key=NAME  skip the SSH key prompt, use this key name
 #   --tier=1|2|3    skip the price tier prompt, use this tier
-#   --yes           auto-confirm the upstream fork-sync push prompt
+#   --yes           auto-confirm the fork-sync push prompt
 #   These flags exist so GUI wrappers can drive this script non-interactively;
 #   omit any of them and the matching prompt below still runs as normal.
 #
 # Operator secrets come from the environment (game-agnostic):
 #   DEPLOY_SQL_USER      database user to create on the droplet
 #   DEPLOY_SQL_PASSWORD  password for that user
+#   GPG_PASSPHRASE       optional; decrypts the backup non-interactively
+#                        (--batch --passphrase-fd) instead of prompting via
+#                        pinentry. Needed when driven from the GUI, which has
+#                        no TTY for pinentry to use; omit it for normal
+#                        interactive CLI use and gpg prompts as usual.
 ################################################################################
 
 set -e # exit on any command error
@@ -28,7 +34,7 @@ OPS_DIR="$(cd "$(dirname "$0")" && pwd)"
 SSH_KEY_NAME_FLAG=""
 PRICE_TIER_FLAG=""
 AUTO_YES=0
-GAME_REPO_DIR="$PWD"
+APP_NAME_ARG=""
 for arg in "$@"; do
 	case "$arg" in
 		--ssh-key=*) SSH_KEY_NAME_FLAG="${arg#*=}" ;;
@@ -38,15 +44,16 @@ for arg in "$@"; do
 			echo "Unknown option: $arg"
 			exit 1
 			;;
-		*) GAME_REPO_DIR="$arg" ;;
+		*) APP_NAME_ARG="$arg" ;;
 	esac
 done
-GAME_REPO_DIR="$(cd "$GAME_REPO_DIR" && pwd)"
+: "${APP_NAME_ARG:?Usage: ./create.sh APP_NAME [--ssh-key=NAME] [--tier=1|2|3] [--yes]}"
+GAME_CONFIG_DIR="$OPS_DIR/games/$APP_NAME_ARG"
 
 ################################################################################
 # load per-game config
 
-CONFIG_PATH="$GAME_REPO_DIR/deploy.conf"
+CONFIG_PATH="$GAME_CONFIG_DIR/deploy.conf"
 if [ ! -f "$CONFIG_PATH" ]; then
 	echo "Config not found: $CONFIG_PATH"
 	exit 1
@@ -78,22 +85,27 @@ if [[ -z "$DEPLOY_SQL_PASSWORD" ]]; then
 fi
 
 ################################################################################
-# get latest database backup
+# get latest database backup (optional)
 
-BACKUP_DIR="$GAME_REPO_DIR/backups"
+BACKUP_DIR="$GAME_CONFIG_DIR/backups"
 BACKUP_GPG_FILE=$(ls "$BACKUP_DIR"/*.gpg 2>/dev/null | tail -n 1 || true)
+BACKUP_SQL_PATH=""
+
 if [[ -z "$BACKUP_GPG_FILE" ]]; then
-	echo "No *.gpg backup found in: $BACKUP_DIR"
-	exit 1
-fi
+	echo "No *.gpg backup found in: $BACKUP_DIR (creating fresh database)"
+else
+	BACKUP_SQL_PATH="${BACKUP_GPG_FILE::-4}"
+	rm -f "$BACKUP_SQL_PATH"
+	if [[ -n "$GPG_PASSPHRASE" ]]; then
+		gpg --batch --yes --pinentry-mode loopback --passphrase-fd 3 -d --output "$BACKUP_SQL_PATH" "$BACKUP_GPG_FILE" 3<<< "$GPG_PASSPHRASE"
+	else
+		gpg -d --output "$BACKUP_SQL_PATH" "$BACKUP_GPG_FILE"
+	fi
 
-BACKUP_SQL_PATH="${BACKUP_GPG_FILE::-4}"
-rm -f "$BACKUP_SQL_PATH"
-gpg -d --output "$BACKUP_SQL_PATH" "$BACKUP_GPG_FILE"
-
-if [ ! -f "$BACKUP_SQL_PATH" ]; then
-	echo "File not found: $BACKUP_SQL_PATH"
-	exit 1
+	if [ ! -f "$BACKUP_SQL_PATH" ]; then
+		echo "File not found: $BACKUP_SQL_PATH"
+		exit 1
+	fi
 fi
 
 ################################################################################
@@ -111,33 +123,49 @@ sed \
 
 ################################################################################
 # sync fork with upstream if configured
+#
+# GIT_REPO/GIT_UPSTREAM are just "owner/name" strings — no local checkout of
+# the game repo exists anywhere in this flow, so this syncs the two remotes
+# directly through a throwaway git dir rather than cd-ing into a checkout.
 
 if [[ -n "$GIT_UPSTREAM" && "$GIT_UPSTREAM" != "$GIT_REPO" ]]; then
-	echo "Syncing fork $GIT_REPO with upstream $GIT_UPSTREAM..."
+	echo "----------------------------------------"
+	echo "Checking Fork Sync ($GIT_REPO vs $GIT_UPSTREAM)..."
+
+	GIT_REPO_URL="https://github.com/$GIT_REPO.git"
+	GIT_UPSTREAM_URL="https://github.com/$GIT_UPSTREAM.git"
+
+	SYNC_DIR=$(mktemp -d)
+	trap 'rm -rf "$SYNC_DIR"; rm -f "$SETUP_SCRIPT_PATH" "$APP_SPEC_PATH"' EXIT
 	(
-		cd "$GAME_REPO_DIR"
-		if ! git remote | grep -q upstream; then
-			git remote add upstream "https://github.com/$GIT_UPSTREAM.git"
-		fi
-		git fetch upstream
-		COMMITS_TO_PUSH=$(git log origin/main..upstream/main --oneline)
+		cd "$SYNC_DIR"
+		git init -q
+
+		DEFAULT_BRANCH=$(git ls-remote --symref "$GIT_REPO_URL" HEAD | sed -n 's#^ref: refs/heads/\(.*\)\tHEAD$#\1#p')
+		: "${DEFAULT_BRANCH:?could not determine default branch of $GIT_REPO}"
+
+		git fetch -q "$GIT_REPO_URL" "$DEFAULT_BRANCH":origin-head
+		git fetch -q "$GIT_UPSTREAM_URL" "$DEFAULT_BRANCH":upstream-head
+
+		COMMITS_TO_PUSH=$(git log origin-head..upstream-head --oneline)
 		if [[ -z "$COMMITS_TO_PUSH" ]]; then
-			echo "No new commits to push from upstream/main to origin/main. Continuing automatically."
+			echo "Fork is up to date with upstream."
 		else
-			echo "The following commits will be pushed from upstream/main to origin/main:"
+			echo "The following commits will be pushed from $GIT_UPSTREAM to $GIT_REPO:"
 			echo "$COMMITS_TO_PUSH"
 			if [[ "$AUTO_YES" -eq 1 ]]; then
 				echo "Auto-confirming push (--yes)"
-				git push origin upstream/main:main
+				git push "$GIT_REPO_URL" upstream-head:"$DEFAULT_BRANCH"
 			else
 				read -p "Do you want to continue with the push? (y/N): " CONFIRM_PUSH
 				if [[ "$CONFIRM_PUSH" =~ ^[Yy]$ ]]; then
-					git push origin upstream/main:main
+					git push "$GIT_REPO_URL" upstream-head:"$DEFAULT_BRANCH"
 				else
 					echo "Push cancelled by user. Exiting script."
 					exit 1
 				fi
 			fi
+			echo "Fork Synced"
 		fi
 	)
 fi
@@ -277,15 +305,20 @@ done
 echo "Droplet Finished Setup"
 
 ################################################################################
-# restore database from backup
+# restore database from backup (if available)
 
 echo "----------------------------------------"
-echo "Restoring Database..."
 
-scp -o StrictHostKeyChecking=no "$BACKUP_SQL_PATH" root@"$DROPLET_IP":/root/restore.sql >/dev/null 2>&1
-ssh root@"$DROPLET_IP" "mariadb $DB_NAME < /root/restore.sql"
-
-echo "Database Restored"
+if [[ -n "$BACKUP_SQL_PATH" ]]; then
+	echo "Restoring Database from Backup..."
+	scp -o StrictHostKeyChecking=no "$BACKUP_SQL_PATH" root@"$DROPLET_IP":/root/restore.sql >/dev/null 2>&1
+	ssh root@"$DROPLET_IP" "mariadb $DB_NAME < /root/restore.sql"
+	echo "Database Restored"
+else
+	echo "Creating Fresh Database..."
+	ssh root@"$DROPLET_IP" "mariadb -e 'CREATE DATABASE IF NOT EXISTS $DB_NAME;'"
+	echo "Database Created (app will initialize schema on startup)"
+fi
 
 ################################################################################
 # create app

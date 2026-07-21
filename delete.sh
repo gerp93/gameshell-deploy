@@ -2,23 +2,30 @@
 ################################################################################
 # Back up and delete a Digital Ocean instance of a gameshell-framework game.
 #
-# Usage:  ./delete.sh [GAME_REPO_DIR] [--backup=yes|no]
-#   GAME_REPO_DIR defaults to the current directory. It must contain a
-#   deploy.conf (see examples/deploy.conf). A new GPG-encrypted backup is
-#   written into GAME_REPO_DIR/backups before teardown (unless declined).
+# Usage:  ./delete.sh APP_NAME [--backup=yes|no]
+#   APP_NAME is the game name (e.g., timeline-trivia, card-judge). Config is
+#   read from games/APP_NAME/deploy.conf. A new GPG-encrypted backup is
+#   written into games/APP_NAME/backups before teardown (unless declined).
 #
 #   --backup=yes|no  skip the backup prompt, use this answer
 #   This flag exists so GUI wrappers can drive this script non-interactively;
 #   omit it and the backup prompt below still runs as normal.
+#
+# Operator secret (optional): GPG_PASSPHRASE encrypts the new backup
+# non-interactively (--batch --passphrase-fd) instead of prompting via
+# pinentry. Needed when driven from the GUI, which has no TTY for pinentry
+# to use; omit it for normal interactive CLI use and gpg prompts as usual.
 ################################################################################
 
 set -e # exit on any command error
+
+OPS_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 ################################################################################
 # parse args
 
 BACKUP_FLAG=""
-GAME_REPO_DIR="$PWD"
+APP_NAME_ARG=""
 for arg in "$@"; do
 	case "$arg" in
 		--backup=*) BACKUP_FLAG="${arg#*=}" ;;
@@ -26,15 +33,16 @@ for arg in "$@"; do
 			echo "Unknown option: $arg"
 			exit 1
 			;;
-		*) GAME_REPO_DIR="$arg" ;;
+		*) APP_NAME_ARG="$arg" ;;
 	esac
 done
-GAME_REPO_DIR="$(cd "$GAME_REPO_DIR" && pwd)"
+: "${APP_NAME_ARG:?Usage: ./delete.sh APP_NAME [--backup=yes|no]}"
+GAME_CONFIG_DIR="$OPS_DIR/games/$APP_NAME_ARG"
 
 ################################################################################
 # load per-game config
 
-CONFIG_PATH="$GAME_REPO_DIR/deploy.conf"
+CONFIG_PATH="$GAME_CONFIG_DIR/deploy.conf"
 if [ ! -f "$CONFIG_PATH" ]; then
 	echo "Config not found: $CONFIG_PATH"
 	exit 1
@@ -46,7 +54,7 @@ source "$CONFIG_PATH"
 : "${DB_NAME:?deploy.conf must set DB_NAME}"
 
 DROPLET_NAME="$APP_NAME-database"
-BACKUP_DIR="$GAME_REPO_DIR/backups"
+BACKUP_DIR="$GAME_CONFIG_DIR/backups"
 
 ################################################################################
 # delete droplet
@@ -108,7 +116,11 @@ else
 
 		BACKUP_GPG_PATH="$BACKUP_SQL_PATH".gpg
 		rm -f "$BACKUP_GPG_PATH"
-		gpg -c --output "$BACKUP_GPG_PATH" "$BACKUP_SQL_PATH"
+		if [[ -n "$GPG_PASSPHRASE" ]]; then
+			gpg --batch --yes --pinentry-mode loopback --passphrase-fd 3 -c --output "$BACKUP_GPG_PATH" "$BACKUP_SQL_PATH" 3<<< "$GPG_PASSPHRASE"
+		else
+			gpg -c --output "$BACKUP_GPG_PATH" "$BACKUP_SQL_PATH"
+		fi
 
 		if [ ! -f "$BACKUP_GPG_PATH" ]; then
 			echo "File not found: $BACKUP_GPG_PATH"

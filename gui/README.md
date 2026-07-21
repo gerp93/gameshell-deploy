@@ -41,9 +41,9 @@ Produces a native binary under `gui/build/bin/`.
 - `platform/` — OS-specific command building (native on macOS/Linux, via
   `wsl.exe` on Windows); everything else in this app is OS-agnostic.
 - `scriptrunner/` — invokes `create.sh`/`delete.sh` and streams their output.
-- `deployconf/` — reads/writes a game repo's `deploy.conf` without
+- `deployconf/` — reads/writes a game's `games/APP_NAME/deploy.conf` without
   disturbing its comments.
 - `preflight/` — checks doctl/gpg/ssh (and WSL, on Windows) are present.
-- `settings/` — persists the chosen ops-repo/game-repo paths (never
-  secrets) outside the repo tree.
+- `settings/` — persists the chosen ops-repo path and last-used app name
+  (never secrets) outside the repo tree.
 - `frontend/` — the UI (plain TypeScript + Vite, no framework).

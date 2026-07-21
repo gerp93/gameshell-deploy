@@ -6,8 +6,8 @@ import * as Backend from "../wailsjs/go/main/App";
 import { EventsOn } from "../wailsjs/runtime/runtime";
 
 export interface Settings {
-  opsDir: string;
-  lastGameRepoDir: string;
+  lastAppName: string;
+  theme: string;
 }
 
 export interface DeployConf {
@@ -39,48 +39,63 @@ export interface PreflightResult {
 }
 
 export interface LogLine {
+  appName: string;
   stream: "stdout" | "stderr";
   text: string;
 }
 
 export interface ExitInfo {
+  appName: string;
   code: number;
   err?: string;
 }
 
+export interface StatusResult {
+  dropletExists: boolean;
+  appExists: boolean;
+}
+
 export interface CreateRequest {
   opsDir: string;
-  gameRepoDir: string;
+  appName: string;
   sshKeyName: string;
   tier: string;
   autoYes: boolean;
   sqlUser: string;
   sqlPassword: string;
+  gpgPassphrase: string;
 }
 
 export interface DeleteRequest {
   opsDir: string;
-  gameRepoDir: string;
+  appName: string;
   backup: "yes" | "no" | "";
+  gpgPassphrase: string;
 }
 
 export const loadSettings = (): Promise<Settings> => Backend.LoadSettings();
-export const selectOpsDir = (): Promise<string> => Backend.SelectOpsDir();
-export const selectGameRepoDir = (): Promise<string> => Backend.SelectGameRepoDir();
-export const hasBackups = (gameRepoDir: string): Promise<boolean> => Backend.HasBackups(gameRepoDir);
+export const getOpsDir = (): Promise<string> => Backend.GetOpsDir();
+export const openOpsDir = (opsDir: string): Promise<void> => Backend.OpenOpsDir(opsDir);
+export const listGames = (opsDir: string): Promise<string[]> => Backend.ListGames(opsDir);
+export const selectApp = (appName: string): Promise<void> => Backend.SelectApp(appName);
+export const setTheme = (theme: string): Promise<void> => Backend.SetTheme(theme);
+export const hasBackups = (opsDir: string, appName: string): Promise<boolean> => Backend.HasBackups(opsDir, appName);
+export const openBackupsFolder = (opsDir: string, appName: string): Promise<void> => Backend.OpenBackupsFolder(opsDir, appName);
 
-export const loadDeployConf = (gameRepoDir: string): Promise<DeployConfResult> => Backend.LoadDeployConf(gameRepoDir);
-export const createDeployConf = (opsDir: string, gameRepoDir: string, conf: DeployConf): Promise<void> =>
-  Backend.CreateDeployConf(opsDir, gameRepoDir, conf);
-export const saveDeployConf = (gameRepoDir: string, conf: DeployConf): Promise<void> =>
-  Backend.SaveDeployConf(gameRepoDir, conf);
+export const loadDeployConf = (opsDir: string, appName: string): Promise<DeployConfResult> =>
+  Backend.LoadDeployConf(opsDir, appName);
+export const createDeployConf = (opsDir: string, appName: string, conf: DeployConf): Promise<void> =>
+  Backend.CreateDeployConf(opsDir, appName, conf);
+export const saveDeployConf = (opsDir: string, appName: string, conf: DeployConf): Promise<void> =>
+  Backend.SaveDeployConf(opsDir, appName, conf);
 
 export const runPreflightChecks = (): Promise<PreflightResult> => Backend.RunPreflightChecks();
 export const listSSHKeys = (): Promise<string[]> => Backend.ListSSHKeys();
+export const checkStatus = (appName: string): Promise<StatusResult> => Backend.CheckStatus(appName);
 
 export const runCreate = (req: CreateRequest): Promise<void> => Backend.RunCreate(req);
 export const runDelete = (req: DeleteRequest): Promise<void> => Backend.RunDelete(req);
-export const cancelRun = (): Promise<boolean> => Backend.CancelRun();
+export const cancelRun = (appName: string): Promise<boolean> => Backend.CancelRun(appName);
 
 export function onLog(event: "create:log" | "delete:log", handler: (line: LogLine) => void): void {
   EventsOn(event, handler);

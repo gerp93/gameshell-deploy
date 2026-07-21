@@ -1,6 +1,6 @@
-// Package deployconf reads and writes a game repo's deploy.conf without
-// disturbing its comments or key ordering — it rewrites only the values on
-// recognized KEY= lines, leaving everything else (including
+// Package deployconf reads and writes a game's games/APP_NAME/deploy.conf
+// without disturbing its comments or key ordering — it rewrites only the
+// values on recognized KEY= lines, leaving everything else (including
 // examples/deploy.conf's documentation comments) untouched.
 package deployconf
 

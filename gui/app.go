@@ -5,10 +5,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 
 	"gameshell-deploy-gui/deployconf"
+	"gameshell-deploy-gui/platform"
 	"gameshell-deploy-gui/preflight"
 	"gameshell-deploy-gui/scriptrunner"
 	"gameshell-deploy-gui/settings"
@@ -30,33 +32,40 @@ func (a *App) startup(ctx context.Context) {
 
 // --- settings / ops repo / game repo -----------------------------------
 
-// LoadSettings returns the persisted operator preferences (ops dir, last
-// game repo dir). Never contains secrets.
+// LoadSettings returns the persisted operator preferences (last app name).
+// Never contains secrets.
 func (a *App) LoadSettings() (settings.Settings, error) {
 	return settings.Load()
 }
 
-// SelectOpsDir opens a directory picker and, if the chosen directory looks
-// like a gameshell-deploy checkout, persists it as the ops dir.
-func (a *App) SelectOpsDir() (string, error) {
-	dir, err := runtime.OpenDirectoryDialog(a.ctx, runtime.OpenDialogOptions{
-		Title: "Select your gameshell-deploy checkout",
-	})
-	if err != nil || dir == "" {
-		return "", err
-	}
-	if err := validateOpsDir(dir); err != nil {
-		return "", err
-	}
-	s, err := settings.Load()
+// GetOpsDir locates the gameshell-deploy checkout this GUI is running from
+// — it's always the checkout containing the running executable (gui is
+// built and run from inside it, normally at gui/build/bin/), never a
+// user-picked folder, since games/ is expected to live right alongside
+// create.sh/delete.sh in the same checkout as the GUI itself.
+func (a *App) GetOpsDir() (string, error) {
+	exe, err := os.Executable()
 	if err != nil {
 		return "", err
 	}
-	s.OpsDir = dir
-	if err := settings.Save(s); err != nil {
-		return "", err
+	dir := filepath.Dir(exe)
+	for i := 0; i < 6; i++ {
+		if validateOpsDir(dir) == nil {
+			return dir, nil
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
+		}
+		dir = parent
 	}
-	return dir, nil
+	return "", fmt.Errorf("could not find a gameshell-deploy checkout (create.sh, delete.sh, templates/, examples/) above %s", filepath.Dir(exe))
+}
+
+// OpenOpsDir opens opsDir in the host's file manager (Explorer/Finder), so
+// the operator can inspect games/, backups/, etc. directly.
+func (a *App) OpenOpsDir(opsDir string) error {
+	return platform.OpenFolder(opsDir)
 }
 
 func validateOpsDir(dir string) error {
@@ -75,35 +84,71 @@ func validateOpsDir(dir string) error {
 	return nil
 }
 
-// SelectGameRepoDir opens a directory picker for the game repo checkout and
-// remembers it for next time.
-func (a *App) SelectGameRepoDir() (string, error) {
-	dir, err := runtime.OpenDirectoryDialog(a.ctx, runtime.OpenDialogOptions{
-		Title: "Select the game repo checkout",
-	})
-	if err != nil || dir == "" {
-		return "", err
+// ListGames returns the app names under opsDir/games/ (each a subdirectory
+// holding that game's deploy.conf and backups/), sorted alphabetically.
+func (a *App) ListGames(opsDir string) ([]string, error) {
+	entries, err := os.ReadDir(filepath.Join(opsDir, "games"))
+	if os.IsNotExist(err) {
+		return []string{}, nil
 	}
-	s, err := settings.Load()
 	if err != nil {
-		return "", err
+		return nil, err
 	}
-	s.LastGameRepoDir = dir
-	if err := settings.Save(s); err != nil {
-		return "", err
+	var names []string
+	for _, e := range entries {
+		if e.IsDir() {
+			names = append(names, e.Name())
+		}
 	}
-	return dir, nil
+	sort.Strings(names)
+	return names, nil
 }
 
-// HasBackups reports whether gameRepoDir/backups contains at least one
+// SelectApp remembers appName as the last-used app for next time.
+func (a *App) SelectApp(appName string) error {
+	s, err := settings.Load()
+	if err != nil {
+		return err
+	}
+	s.LastAppName = appName
+	return settings.Save(s)
+}
+
+// SetTheme remembers the operator's chosen UI theme (a data-theme slug, or
+// "" for the default) for next time.
+func (a *App) SetTheme(theme string) error {
+	s, err := settings.Load()
+	if err != nil {
+		return err
+	}
+	s.Theme = theme
+	return settings.Save(s)
+}
+
+func gameConfigDir(opsDir, appName string) string {
+	return filepath.Join(opsDir, "games", appName)
+}
+
+// HasBackups reports whether games/appName/backups contains at least one
 // *.gpg file, mirroring create.sh's own check — surfaced earlier in the UI
 // instead of failing deep into a run.
-func (a *App) HasBackups(gameRepoDir string) (bool, error) {
-	matches, err := filepath.Glob(filepath.Join(gameRepoDir, "backups", "*.gpg"))
+func (a *App) HasBackups(opsDir, appName string) (bool, error) {
+	matches, err := filepath.Glob(filepath.Join(gameConfigDir(opsDir, appName), "backups", "*.gpg"))
 	if err != nil {
 		return false, err
 	}
 	return len(matches) > 0, nil
+}
+
+// OpenBackupsFolder opens games/appName/backups in the host's file manager,
+// creating it first if it doesn't exist yet (e.g. a brand new game with no
+// backups taken).
+func (a *App) OpenBackupsFolder(opsDir, appName string) error {
+	dir := filepath.Join(gameConfigDir(opsDir, appName), "backups")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	return platform.OpenFolder(dir)
 }
 
 // --- deploy.conf editor ---------------------------------------------------
@@ -115,8 +160,8 @@ type DeployConfResult struct {
 	Conf  deployconf.DeployConf `json:"conf"`
 }
 
-func (a *App) LoadDeployConf(gameRepoDir string) (DeployConfResult, error) {
-	path := filepath.Join(gameRepoDir, "deploy.conf")
+func (a *App) LoadDeployConf(opsDir, appName string) (DeployConfResult, error) {
+	path := filepath.Join(gameConfigDir(opsDir, appName), "deploy.conf")
 	if !deployconf.Exists(path) {
 		return DeployConfResult{Found: false}, nil
 	}
@@ -127,25 +172,30 @@ func (a *App) LoadDeployConf(gameRepoDir string) (DeployConfResult, error) {
 	return DeployConfResult{Found: true, Conf: conf}, nil
 }
 
-// CreateDeployConf copies OpsDir/examples/deploy.conf into gameRepoDir and
-// applies conf's values on top of it.
-func (a *App) CreateDeployConf(opsDir, gameRepoDir string, conf deployconf.DeployConf) error {
+// CreateDeployConf creates games/appName/ (and its backups/ subdirectory),
+// copies OpsDir/examples/deploy.conf into it, and applies conf's values on
+// top of it.
+func (a *App) CreateDeployConf(opsDir, appName string, conf deployconf.DeployConf) error {
 	if errs := deployconf.Validate(conf); len(errs) > 0 {
 		return fmt.Errorf("invalid deploy.conf: %v", errs)
 	}
+	configDir := gameConfigDir(opsDir, appName)
+	if err := os.MkdirAll(filepath.Join(configDir, "backups"), 0o755); err != nil {
+		return err
+	}
 	templatePath := filepath.Join(opsDir, "examples", "deploy.conf")
-	destPath := filepath.Join(gameRepoDir, "deploy.conf")
+	destPath := filepath.Join(configDir, "deploy.conf")
 	if err := deployconf.CreateFromTemplate(templatePath, destPath); err != nil {
 		return err
 	}
 	return deployconf.Save(destPath, conf)
 }
 
-func (a *App) SaveDeployConf(gameRepoDir string, conf deployconf.DeployConf) error {
+func (a *App) SaveDeployConf(opsDir, appName string, conf deployconf.DeployConf) error {
 	if errs := deployconf.Validate(conf); len(errs) > 0 {
 		return fmt.Errorf("invalid deploy.conf: %v", errs)
 	}
-	return deployconf.Save(filepath.Join(gameRepoDir, "deploy.conf"), conf)
+	return deployconf.Save(filepath.Join(gameConfigDir(opsDir, appName), "deploy.conf"), conf)
 }
 
 // --- preflight -------------------------------------------------------------
@@ -173,6 +223,13 @@ func (a *App) ListSSHKeys() ([]string, error) {
 	return scriptrunner.ListSSHKeys()
 }
 
+// CheckStatus reports whether appName (deploy.conf's APP_NAME) already has a
+// droplet/app on Digital Ocean, so the frontend knows whether it's set up
+// for a Deploy or a Teardown.
+func (a *App) CheckStatus(appName string) (scriptrunner.StatusResult, error) {
+	return scriptrunner.CheckStatus(appName)
+}
+
 // RunCreate starts create.sh in the background and returns immediately;
 // progress and the final result arrive as "create:log" / "create:exit"
 // events (see scriptrunner.RunCreate).
@@ -191,9 +248,9 @@ func (a *App) RunDelete(req scriptrunner.DeleteRequest) {
 	}()
 }
 
-// CancelRun kills the currently running script, if any. It does not clean
+// CancelRun kills the running script for appName, if any. It does not clean
 // up any cloud resources already created — the same caveat as Ctrl-C
 // during CLI use.
-func (a *App) CancelRun() bool {
-	return scriptrunner.Cancel()
+func (a *App) CancelRun(appName string) bool {
+	return scriptrunner.Cancel(appName)
 }

@@ -26,10 +26,13 @@ const fieldDefs: Array<{ key: keyof DeployConf; label: string; required: boolean
 ];
 
 export function createConfigForm(): { el: HTMLElement; render: () => void } {
-  const section = document.createElement("section");
-  section.innerHTML = "<h2>deploy.conf</h2>";
+  const el = document.createElement("div");
+  el.innerHTML = `<p class="hint">Stored at games/APP_NAME/deploy.conf. Save it to unlock the Deploy tab.</p>`;
 
   const form = document.createElement("form");
+  const grid = document.createElement("div");
+  grid.className = "field-grid";
+  form.appendChild(grid);
   const inputs: Partial<Record<keyof DeployConf, HTMLInputElement>> = {};
 
   for (const def of fieldDefs) {
@@ -41,7 +44,7 @@ export function createConfigForm(): { el: HTMLElement; render: () => void } {
     input.required = def.required;
     wrapper.appendChild(label);
     wrapper.appendChild(input);
-    form.appendChild(wrapper);
+    grid.appendChild(wrapper);
     inputs[def.key] = input;
   }
 
@@ -50,8 +53,9 @@ export function createConfigForm(): { el: HTMLElement; render: () => void } {
   form.appendChild(saveButton);
 
   const message = document.createElement("div");
-  section.appendChild(form);
-  section.appendChild(message);
+  message.className = "status-line";
+  el.appendChild(form);
+  el.appendChild(message);
 
   function currentConf(): DeployConf {
     const conf = { ...emptyConf };
@@ -73,9 +77,9 @@ export function createConfigForm(): { el: HTMLElement; render: () => void } {
     try {
       const conf = currentConf();
       if (state.deployConfFound) {
-        await saveDeployConf(state.gameRepoDir, conf);
+        await saveDeployConf(state.opsDir, state.appName, conf);
       } else {
-        await createDeployConf(state.opsDir, state.gameRepoDir, conf);
+        await createDeployConf(state.opsDir, state.appName, conf);
         state.deployConfFound = true;
       }
       state.deployConf = conf;
@@ -87,11 +91,11 @@ export function createConfigForm(): { el: HTMLElement; render: () => void } {
   };
 
   function render() {
-    section.dataset.disabled = state.gameRepoDir ? "false" : "true";
+    el.dataset.disabled = state.appName ? "false" : "true";
     saveButton.textContent = state.deployConfFound ? "Save deploy.conf" : "Create deploy.conf";
     if (state.deployConf) fillForm(state.deployConf);
   }
 
   render();
-  return { el: section, render };
+  return { el, render };
 }
