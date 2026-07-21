@@ -2,15 +2,33 @@
 ################################################################################
 # Back up and delete a Digital Ocean instance of a gameshell-framework game.
 #
-# Usage:  ./delete.sh [GAME_REPO_DIR]
+# Usage:  ./delete.sh [GAME_REPO_DIR] [--backup=yes|no]
 #   GAME_REPO_DIR defaults to the current directory. It must contain a
 #   deploy.conf (see examples/deploy.conf). A new GPG-encrypted backup is
 #   written into GAME_REPO_DIR/backups before teardown (unless declined).
+#
+#   --backup=yes|no  skip the backup prompt, use this answer
+#   This flag exists so GUI wrappers can drive this script non-interactively;
+#   omit it and the backup prompt below still runs as normal.
 ################################################################################
 
 set -e # exit on any command error
 
-GAME_REPO_DIR="${1:-$PWD}"
+################################################################################
+# parse args
+
+BACKUP_FLAG=""
+GAME_REPO_DIR="$PWD"
+for arg in "$@"; do
+	case "$arg" in
+		--backup=*) BACKUP_FLAG="${arg#*=}" ;;
+		-*)
+			echo "Unknown option: $arg"
+			exit 1
+			;;
+		*) GAME_REPO_DIR="$arg" ;;
+	esac
+done
 GAME_REPO_DIR="$(cd "$GAME_REPO_DIR" && pwd)"
 
 ################################################################################
@@ -40,7 +58,12 @@ DROPLET_ID=$(doctl compute droplet list --format=ID,Name --no-header | grep "$DR
 if [[ -z "$DROPLET_ID" ]]; then
 	echo "Droplet ID not found"
 else
-	read -p "Do you want to backup the database? [Y/n]: " BACKUP_DB
+	if [[ -n "$BACKUP_FLAG" ]]; then
+		BACKUP_DB=$( [[ "$BACKUP_FLAG" == "no" ]] && echo "n" || echo "y" )
+		echo "Backup database? $BACKUP_DB (from --backup)"
+	else
+		read -p "Do you want to backup the database? [Y/n]: " BACKUP_DB
+	fi
 	if [[ "$BACKUP_DB" != "n" ]]; then
 		echo "----------------------------------------"
 		echo "Backing Up Database..."

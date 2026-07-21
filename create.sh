@@ -2,10 +2,16 @@
 ################################################################################
 # Create a Digital Ocean instance of a gameshell-framework game.
 #
-# Usage:  ./create.sh [GAME_REPO_DIR]
+# Usage:  ./create.sh [GAME_REPO_DIR] [--ssh-key=NAME] [--tier=1|2|3] [--yes]
 #   GAME_REPO_DIR defaults to the current directory. It must contain a
 #   deploy.conf (see examples/deploy.conf) and a backups/ directory holding at
 #   least one GPG-encrypted database backup (*.sql.gpg).
+#
+#   --ssh-key=NAME  skip the SSH key prompt, use this key name
+#   --tier=1|2|3    skip the price tier prompt, use this tier
+#   --yes           auto-confirm the upstream fork-sync push prompt
+#   These flags exist so GUI wrappers can drive this script non-interactively;
+#   omit any of them and the matching prompt below still runs as normal.
 #
 # Operator secrets come from the environment (game-agnostic):
 #   DEPLOY_SQL_USER      database user to create on the droplet
@@ -16,7 +22,25 @@ set -e # exit on any command error
 
 OPS_DIR="$(cd "$(dirname "$0")" && pwd)"
 
-GAME_REPO_DIR="${1:-$PWD}"
+################################################################################
+# parse args
+
+SSH_KEY_NAME_FLAG=""
+PRICE_TIER_FLAG=""
+AUTO_YES=0
+GAME_REPO_DIR="$PWD"
+for arg in "$@"; do
+	case "$arg" in
+		--ssh-key=*) SSH_KEY_NAME_FLAG="${arg#*=}" ;;
+		--tier=*) PRICE_TIER_FLAG="${arg#*=}" ;;
+		--yes) AUTO_YES=1 ;;
+		-*)
+			echo "Unknown option: $arg"
+			exit 1
+			;;
+		*) GAME_REPO_DIR="$arg" ;;
+	esac
+done
 GAME_REPO_DIR="$(cd "$GAME_REPO_DIR" && pwd)"
 
 ################################################################################
@@ -102,12 +126,17 @@ if [[ -n "$GIT_UPSTREAM" && "$GIT_UPSTREAM" != "$GIT_REPO" ]]; then
 		else
 			echo "The following commits will be pushed from upstream/main to origin/main:"
 			echo "$COMMITS_TO_PUSH"
-			read -p "Do you want to continue with the push? (y/N): " CONFIRM_PUSH
-			if [[ "$CONFIRM_PUSH" =~ ^[Yy]$ ]]; then
+			if [[ "$AUTO_YES" -eq 1 ]]; then
+				echo "Auto-confirming push (--yes)"
 				git push origin upstream/main:main
 			else
-				echo "Push cancelled by user. Exiting script."
-				exit 1
+				read -p "Do you want to continue with the push? (y/N): " CONFIRM_PUSH
+				if [[ "$CONFIRM_PUSH" =~ ^[Yy]$ ]]; then
+					git push origin upstream/main:main
+				else
+					echo "Push cancelled by user. Exiting script."
+					exit 1
+				fi
 			fi
 		fi
 	)
@@ -117,9 +146,14 @@ fi
 # get ssh key
 
 echo "----------------------------------------"
-echo "Which of the following SSH Keys should have access to the database droplet?"
-doctl compute ssh-key list --format=Name --no-header
-read -p "SSH Key Name: " SSH_KEY_NAME
+if [[ -n "$SSH_KEY_NAME_FLAG" ]]; then
+	SSH_KEY_NAME="$SSH_KEY_NAME_FLAG"
+	echo "SSH Key Name: $SSH_KEY_NAME (from --ssh-key)"
+else
+	echo "Which of the following SSH Keys should have access to the database droplet?"
+	doctl compute ssh-key list --format=Name --no-header
+	read -p "SSH Key Name: " SSH_KEY_NAME
+fi
 if [[ -z "$SSH_KEY_NAME" ]]; then
 	echo "SSH Key Name not provided"
 	exit 1
@@ -135,11 +169,16 @@ fi
 # get price tier
 
 echo "----------------------------------------"
-echo "Choose price tier to host:"
-echo "1) \$17/month, \$0.02518/hour"
-echo "2) \$48/month, \$0.07155/hour"
-echo "3) \$96/month, \$0.14273/hour"
-read -p "Choice: " PRICE_TIER_CHOICE
+if [[ -n "$PRICE_TIER_FLAG" ]]; then
+	PRICE_TIER_CHOICE="$PRICE_TIER_FLAG"
+	echo "Price tier: $PRICE_TIER_CHOICE (from --tier)"
+else
+	echo "Choose price tier to host:"
+	echo "1) \$17/month, \$0.02518/hour"
+	echo "2) \$48/month, \$0.07155/hour"
+	echo "3) \$96/month, \$0.14273/hour"
+	read -p "Choice: " PRICE_TIER_CHOICE
+fi
 case "$PRICE_TIER_CHOICE" in
 	1)
 		DROPLET_SIZE="s-1vcpu-1gb-amd"
