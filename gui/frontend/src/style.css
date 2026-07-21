@@ -1,0 +1,66 @@
+:root {
+  color-scheme: light dark;
+  font-family: system-ui, sans-serif;
+}
+
+body {
+  margin: 0;
+  padding: 1rem;
+}
+
+section {
+  border: 1px solid #8888;
+  border-radius: 6px;
+  padding: 0.75rem 1rem;
+  margin-bottom: 1rem;
+}
+
+section h2 {
+  margin-top: 0;
+}
+
+section[data-disabled="true"] {
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+.check-row {
+  display: flex;
+  gap: 0.5rem;
+  align-items: baseline;
+}
+
+.check-row .ok {
+  color: #2a2;
+}
+
+.check-row .fail {
+  color: #c33;
+}
+
+.log-pane {
+  background: #111;
+  color: #ddd;
+  font-family: ui-monospace, monospace;
+  font-size: 0.85rem;
+  padding: 0.5rem;
+  height: 240px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+}
+
+.log-pane .stderr {
+  color: #f88;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  margin-bottom: 0.5rem;
+}
+
+.field label {
+  font-size: 0.85rem;
+  font-weight: 600;
+}
