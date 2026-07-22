@@ -13,13 +13,16 @@ and streams their real stdout/stderr into a log pane.
 
 ## Download
 
-Prebuilt Windows releases are published under
+Prebuilt Windows, Linux, and macOS releases are published under
 [Releases](https://github.com/gerp93/gameshell-deploy/releases) — download
-the zip, extract it, and run `gameshell-deploy-gui.exe` from wherever you
-extracted it (it needs the other files in that zip alongside it: `create.sh`,
-`templates/`, `examples/`, `games/`). No Go/Node/Wails install needed to run
-it, only to build it yourself (see below). New releases are built by
-`.github/workflows/release.yml` whenever a `vX.Y.Z` tag is pushed.
+the archive for your OS, extract it, and run `gameshell-deploy-gui`
+(`.exe` on Windows) from wherever you extracted it. It needs the other
+files in that archive alongside it: `create.sh`, `templates/`, `examples/`,
+`games/`. No Go/Node/Wails install needed to run it, only to build it
+yourself (see below). New releases are built by
+`.github/workflows/release.yml` whenever a `vX.Y.Z` tag is pushed. On
+Linux/macOS you'll likely need to mark the binary executable first:
+`chmod +x gameshell-deploy-gui`.
 
 ## Prerequisites
 

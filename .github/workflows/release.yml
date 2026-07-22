@@ -1,9 +1,9 @@
 name: Release GUI
 
-# Builds the Wails desktop GUI (gui/) into a Windows .exe and publishes it as
-# a GitHub Release asset whenever a version tag is pushed. Runs on
-# windows-latest since the GUI targets Windows + WebView2 and shells its
-# scripts through wsl.exe (see gui/platform/platform_windows.go).
+# Builds the Wails desktop GUI (gui/) for Windows, Linux, and macOS and
+# publishes all three as GitHub Release assets whenever a version tag is
+# pushed. The app itself is OS-agnostic (see gui/platform/platform_unix.go
+# vs platform_windows.go — only Windows shells through wsl.exe).
 #
 # To cut a release: git tag v1.2.3 && git push origin v1.2.3
 
@@ -16,8 +16,21 @@ permissions:
   contents: write
 
 jobs:
-  build-and-release:
-    runs-on: windows-latest
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            platform: windows
+            binary: gameshell-deploy-gui.exe
+          - os: ubuntu-latest
+            platform: linux
+            binary: gameshell-deploy-gui
+          - os: macos-latest
+            platform: macos
+            binary: gameshell-deploy-gui
+    runs-on: ${{ matrix.os }}
     steps:
       - name: Check out repo
         uses: actions/checkout@v4
@@ -39,23 +52,40 @@ jobs:
       - name: Install Wails CLI
         run: go install github.com/wailsapp/wails/v2/cmd/wails@latest
 
+      # Ubuntu 24.04 (ubuntu-latest) only ships webkit2gtk 4.1's dev
+      # package, not the older 4.0 Wails v2 defaults to — build with the
+      # 4.1 tag to match. See https://wails.io/docs/gettingstarted/installation
+      # (Linux prerequisites) for why this differs from older distros.
+      - name: Install Linux build dependencies
+        if: matrix.platform == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev
+
       - name: Build GUI
         working-directory: gui
-        run: wails build
+        shell: bash
+        run: |
+          if [ "${{ matrix.platform }}" = "linux" ]; then
+            wails build -tags webkit2_41
+          else
+            wails build
+          fi
 
-      # Package the exe alongside the generic scripts/templates it needs at
-      # runtime (see gui/app.go's GetOpsDir — it walks up from its own
-      # location looking for these), plus the games/ stubs. Placing the exe
-      # at the package root means GetOpsDir finds everything on the first
-      # check, no gui/build/bin/ nesting required.
+      # Package the binary alongside the generic scripts/templates it needs
+      # at runtime (see gui/app.go's GetOpsDir — it walks up from its own
+      # location looking for these), plus the games/ stubs. Placing the
+      # binary at the package root means GetOpsDir finds everything on the
+      # first check, no gui/build/bin/ nesting required.
       - name: Stage release package
         shell: bash
         run: |
           set -e
           VERSION="${GITHUB_REF_NAME}"
-          STAGE="gameshell-deploy-${VERSION}"
+          STAGE="gameshell-deploy-${VERSION}-${{ matrix.platform }}"
           mkdir -p "$STAGE"
-          cp gui/build/bin/gameshell-deploy-gui.exe "$STAGE/"
+          cp "gui/build/bin/${{ matrix.binary }}" "$STAGE/"
+          chmod +x "$STAGE/${{ matrix.binary }}" || true
           cp create.sh delete.sh README.md CLAUDE.md "$STAGE/"
           cp -r templates examples games "$STAGE/"
           # Never ship decrypted backups or a stray operator's encrypted
@@ -63,11 +93,34 @@ jobs:
           # dirs (.gitkeep) should be present, but strip defensively in
           # case anything untracked snuck into the workspace.
           find "$STAGE/games" -type f \( -name '*.sql' -o -name '*.gpg' \) -delete
-          7z a -tzip "${STAGE}.zip" "$STAGE" > /dev/null
-          echo "ASSET_PATH=${STAGE}.zip" >> "$GITHUB_ENV"
+
+          if [ "${{ matrix.platform }}" = "windows" ]; then
+            7z a -tzip "${STAGE}.zip" "$STAGE" > /dev/null
+            echo "ASSET_PATH=${STAGE}.zip" >> "$GITHUB_ENV"
+          else
+            tar czf "${STAGE}.tar.gz" "$STAGE"
+            echo "ASSET_PATH=${STAGE}.tar.gz" >> "$GITHUB_ENV"
+          fi
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: package-${{ matrix.platform }}
+          path: ${{ env.ASSET_PATH }}
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all packages
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          pattern: package-*
+          merge-multiple: true
 
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
-          files: ${{ env.ASSET_PATH }}
+          files: dist/*
           generate_release_notes: true
