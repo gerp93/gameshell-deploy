@@ -1,0 +1,73 @@
+name: Release GUI
+
+# Builds the Wails desktop GUI (gui/) into a Windows .exe and publishes it as
+# a GitHub Release asset whenever a version tag is pushed. Runs on
+# windows-latest since the GUI targets Windows + WebView2 and shells its
+# scripts through wsl.exe (see gui/platform/platform_windows.go).
+#
+# To cut a release: git tag v1.2.3 && git push origin v1.2.3
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: windows-latest
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Add Go bin to PATH
+        shell: bash
+        run: echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+      - name: Install Wails CLI
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@latest
+
+      - name: Build GUI
+        working-directory: gui
+        run: wails build
+
+      # Package the exe alongside the generic scripts/templates it needs at
+      # runtime (see gui/app.go's GetOpsDir — it walks up from its own
+      # location looking for these), plus the games/ stubs. Placing the exe
+      # at the package root means GetOpsDir finds everything on the first
+      # check, no gui/build/bin/ nesting required.
+      - name: Stage release package
+        shell: bash
+        run: |
+          set -e
+          VERSION="${GITHUB_REF_NAME}"
+          STAGE="gameshell-deploy-${VERSION}"
+          mkdir -p "$STAGE"
+          cp gui/build/bin/gameshell-deploy-gui.exe "$STAGE/"
+          cp create.sh delete.sh README.md CLAUDE.md "$STAGE/"
+          cp -r templates examples games "$STAGE/"
+          # Never ship decrypted backups or a stray operator's encrypted
+          # ones — only the tracked games/*/deploy.conf + empty backups/
+          # dirs (.gitkeep) should be present, but strip defensively in
+          # case anything untracked snuck into the workspace.
+          find "$STAGE/games" -type f \( -name '*.sql' -o -name '*.gpg' \) -delete
+          7z a -tzip "${STAGE}.zip" "$STAGE" > /dev/null
+          echo "ASSET_PATH=${STAGE}.zip" >> "$GITHUB_ENV"
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ env.ASSET_PATH }}
+          generate_release_notes: true

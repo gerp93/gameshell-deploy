@@ -6,9 +6,20 @@ who prefer clicking a button over running them from a terminal. See the
 non-bash corner of the repo.
 
 It does not reimplement any deploy logic: it shells out to the tracked
-`create.sh`/`delete.sh` in a `gameshell-deploy` checkout you point it at,
-using their `--ssh-key`/`--tier`/`--yes`/`--backup` flags to drive them
-non-interactively, and streams their real stdout/stderr into a log pane.
+`create.sh`/`delete.sh` in the same checkout it's running from (auto-detected
+from its own location — see `app.go`'s `GetOpsDir`), using their
+`--ssh-key`/`--tier`/`--yes`/`--backup` flags to drive them non-interactively,
+and streams their real stdout/stderr into a log pane.
+
+## Download
+
+Prebuilt Windows releases are published under
+[Releases](https://github.com/gerp93/gameshell-deploy/releases) — download
+the zip, extract it, and run `gameshell-deploy-gui.exe` from wherever you
+extracted it (it needs the other files in that zip alongside it: `create.sh`,
+`templates/`, `examples/`, `games/`). No Go/Node/Wails install needed to run
+it, only to build it yourself (see below). New releases are built by
+`.github/workflows/release.yml` whenever a `vX.Y.Z` tag is pushed.
 
 ## Prerequisites
 
@@ -44,6 +55,7 @@ Produces a native binary under `gui/build/bin/`.
 - `deployconf/` — reads/writes a game's `games/APP_NAME/deploy.conf` without
   disturbing its comments.
 - `preflight/` — checks doctl/gpg/ssh (and WSL, on Windows) are present.
-- `settings/` — persists the chosen ops-repo path and last-used app name
-  (never secrets) outside the repo tree.
+- `settings/` — persists the last-used app name and UI theme (never secrets)
+  outside the repo tree. The ops dir is never persisted — it's re-detected
+  from the running executable's location every startup.
 - `frontend/` — the UI (plain TypeScript + Vite, no framework).
