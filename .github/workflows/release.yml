@@ -77,6 +77,12 @@ jobs:
       # location looking for these), plus the games/ stubs. Placing the
       # binary at the package root means GetOpsDir finds everything on the
       # first check, no gui/build/bin/ nesting required.
+      #
+      # macOS is the odd one out: wails build produces a *.app bundle (a
+      # directory), not a flat binary — the real executable is nested at
+      # <name>.app/Contents/MacOS/<name>. Ship the whole bundle so it stays
+      # a normal double-clickable Mac app; GetOpsDir still finds create.sh
+      # etc. two levels up from Contents/MacOS just fine (it walks up 6).
       - name: Stage release package
         shell: bash
         run: |
@@ -84,8 +90,13 @@ jobs:
           VERSION="${GITHUB_REF_NAME}"
           STAGE="gameshell-deploy-${VERSION}-${{ matrix.platform }}"
           mkdir -p "$STAGE"
-          cp "gui/build/bin/${{ matrix.binary }}" "$STAGE/"
-          chmod +x "$STAGE/${{ matrix.binary }}" || true
+          if [ "${{ matrix.platform }}" = "macos" ]; then
+            cp -r "gui/build/bin/${{ matrix.binary }}.app" "$STAGE/"
+            chmod +x "$STAGE/${{ matrix.binary }}.app/Contents/MacOS/${{ matrix.binary }}"
+          else
+            cp "gui/build/bin/${{ matrix.binary }}" "$STAGE/"
+            chmod +x "$STAGE/${{ matrix.binary }}" || true
+          fi
           cp create.sh delete.sh README.md CLAUDE.md "$STAGE/"
           cp -r templates examples games "$STAGE/"
           # Never ship decrypted backups or a stray operator's encrypted
@@ -110,6 +121,7 @@ jobs:
 
   release:
     needs: build
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     steps:
       - name: Download all packages
