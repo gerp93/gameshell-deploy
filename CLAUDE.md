@@ -41,14 +41,6 @@ encrypts database backups at rest.
   on the droplet). Per-game secrets like `CARD_JUDGE_SQL_PASSWORD` are
   runtime env vars on the DO App, injected by `create.sh` from the operator's
   `DEPLOY_SQL_*` values — never written to a tracked file.
-- **`GPG_PASSPHRASE`** (optional operator secret): backups are symmetric
-  `gpg -c`/`gpg -d`, which normally prompts interactively via pinentry — fine
-  for CLI use, but the GUI has no TTY for that. When set, `create.sh`/
-  `delete.sh` pass it to gpg via `--batch --passphrase-fd` (never argv, never
-  a file) instead of prompting; unset, both fall back to the interactive
-  prompt exactly as before. Don't reintroduce a bare `gpg -c`/`gpg -d` call
-  without this branch — it's the only thing keeping the GUI's fully
-  non-interactive flow working.
 
 `ENV_VAR_PREFIX` is the one value that has to match across repos: the game reads
 its DB settings via `database.SetEnvVarPrefix(ENV_VAR_PREFIX)` in its own `main.go`

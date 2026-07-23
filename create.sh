@@ -2,52 +2,22 @@
 ################################################################################
 # Create a Digital Ocean instance of a gameshell-framework game.
 #
-# Usage:  ./create.sh APP_NAME [--ssh-key=NAME] [--tier=1|2|3] [--yes]
+# Usage:  ./create.sh APP_NAME
 #   APP_NAME is the game name (e.g., timeline-trivia, card-judge). Config and
 #   backups are read from games/APP_NAME/ relative to this script — deploy.conf
 #   (see deploy.conf.template) and a backups/ directory holding at least one
 #   GPG-encrypted database backup (*.sql.gpg).
 #
-#   --ssh-key=NAME  skip the SSH key prompt, use this key name
-#   --tier=1|2|3    skip the price tier prompt, use this tier
-#   --yes           auto-confirm the fork-sync push prompt
-#   These flags exist so GUI wrappers can drive this script non-interactively;
-#   omit any of them and the matching prompt below still runs as normal.
-#
 # Operator secrets come from the environment (game-agnostic):
 #   DEPLOY_SQL_USER      database user to create on the droplet
 #   DEPLOY_SQL_PASSWORD  password for that user
-#   GPG_PASSPHRASE       optional; decrypts the backup non-interactively
-#                        (--batch --passphrase-fd) instead of prompting via
-#                        pinentry. Needed when driven from the GUI, which has
-#                        no TTY for pinentry to use; omit it for normal
-#                        interactive CLI use and gpg prompts as usual.
 ################################################################################
 
 set -e # exit on any command error
 
 OPS_DIR="$(cd "$(dirname "$0")" && pwd)"
 
-################################################################################
-# parse args
-
-SSH_KEY_NAME_FLAG=""
-PRICE_TIER_FLAG=""
-AUTO_YES=0
-APP_NAME_ARG=""
-for arg in "$@"; do
-	case "$arg" in
-		--ssh-key=*) SSH_KEY_NAME_FLAG="${arg#*=}" ;;
-		--tier=*) PRICE_TIER_FLAG="${arg#*=}" ;;
-		--yes) AUTO_YES=1 ;;
-		-*)
-			echo "Unknown option: $arg"
-			exit 1
-			;;
-		*) APP_NAME_ARG="$arg" ;;
-	esac
-done
-: "${APP_NAME_ARG:?Usage: ./create.sh APP_NAME [--ssh-key=NAME] [--tier=1|2|3] [--yes]}"
+APP_NAME_ARG="${1:?Usage: ./create.sh APP_NAME}"
 GAME_CONFIG_DIR="$OPS_DIR/games/$APP_NAME_ARG"
 
 ################################################################################
@@ -96,11 +66,7 @@ if [[ -z "$BACKUP_GPG_FILE" ]]; then
 else
 	BACKUP_SQL_PATH="${BACKUP_GPG_FILE::-4}"
 	rm -f "$BACKUP_SQL_PATH"
-	if [[ -n "$GPG_PASSPHRASE" ]]; then
-		gpg --batch --yes --pinentry-mode loopback --passphrase-fd 3 -d --output "$BACKUP_SQL_PATH" "$BACKUP_GPG_FILE" 3<<< "$GPG_PASSPHRASE"
-	else
-		gpg -d --output "$BACKUP_SQL_PATH" "$BACKUP_GPG_FILE"
-	fi
+	gpg -d --output "$BACKUP_SQL_PATH" "$BACKUP_GPG_FILE"
 
 	if [ ! -f "$BACKUP_SQL_PATH" ]; then
 		echo "File not found: $BACKUP_SQL_PATH"
@@ -153,17 +119,12 @@ if [[ -n "$GIT_UPSTREAM" && "$GIT_UPSTREAM" != "$GIT_REPO" ]]; then
 		else
 			echo "The following commits will be pushed from $GIT_UPSTREAM to $GIT_REPO:"
 			echo "$COMMITS_TO_PUSH"
-			if [[ "$AUTO_YES" -eq 1 ]]; then
-				echo "Auto-confirming push (--yes)"
+			read -p "Do you want to continue with the push? (y/N): " CONFIRM_PUSH
+			if [[ "$CONFIRM_PUSH" =~ ^[Yy]$ ]]; then
 				git push "$GIT_REPO_URL" upstream-head:"$DEFAULT_BRANCH"
 			else
-				read -p "Do you want to continue with the push? (y/N): " CONFIRM_PUSH
-				if [[ "$CONFIRM_PUSH" =~ ^[Yy]$ ]]; then
-					git push "$GIT_REPO_URL" upstream-head:"$DEFAULT_BRANCH"
-				else
-					echo "Push cancelled by user. Exiting script."
-					exit 1
-				fi
+				echo "Push cancelled by user. Exiting script."
+				exit 1
 			fi
 			echo "Fork Synced"
 		fi
@@ -174,14 +135,9 @@ fi
 # get ssh key
 
 echo "----------------------------------------"
-if [[ -n "$SSH_KEY_NAME_FLAG" ]]; then
-	SSH_KEY_NAME="$SSH_KEY_NAME_FLAG"
-	echo "SSH Key Name: $SSH_KEY_NAME (from --ssh-key)"
-else
-	echo "Which of the following SSH Keys should have access to the database droplet?"
-	doctl compute ssh-key list --format=Name --no-header
-	read -p "SSH Key Name: " SSH_KEY_NAME
-fi
+echo "Which of the following SSH Keys should have access to the database droplet?"
+doctl compute ssh-key list --format=Name --no-header
+read -p "SSH Key Name: " SSH_KEY_NAME
 if [[ -z "$SSH_KEY_NAME" ]]; then
 	echo "SSH Key Name not provided"
 	exit 1
@@ -197,16 +153,11 @@ fi
 # get price tier
 
 echo "----------------------------------------"
-if [[ -n "$PRICE_TIER_FLAG" ]]; then
-	PRICE_TIER_CHOICE="$PRICE_TIER_FLAG"
-	echo "Price tier: $PRICE_TIER_CHOICE (from --tier)"
-else
-	echo "Choose price tier to host:"
-	echo "1) \$17/month, \$0.02518/hour"
-	echo "2) \$48/month, \$0.07155/hour"
-	echo "3) \$96/month, \$0.14273/hour"
-	read -p "Choice: " PRICE_TIER_CHOICE
-fi
+echo "Choose price tier to host:"
+echo "1) \$17/month, \$0.02518/hour"
+echo "2) \$48/month, \$0.07155/hour"
+echo "3) \$96/month, \$0.14273/hour"
+read -p "Choice: " PRICE_TIER_CHOICE
 case "$PRICE_TIER_CHOICE" in
 	1)
 		DROPLET_SIZE="s-1vcpu-1gb-amd"
