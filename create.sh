@@ -39,6 +39,28 @@ if git -C "$OPS_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
 				fi
 			fi
 		fi
+
+		# If this checkout is itself a fork (has a conventional "upstream"
+		# remote), check that too — same fetch-only, never-pull, confirm
+		# pattern, just against the original repo instead of the fork.
+		if git -C "$OPS_DIR" remote get-url upstream >/dev/null 2>&1; then
+			if git -C "$OPS_DIR" fetch --quiet upstream 2>/dev/null; then
+				UPSTREAM_DEFAULT_BRANCH=$(git -C "$OPS_DIR" ls-remote --symref upstream HEAD | sed -n 's#^ref: refs/heads/\(.*\)\tHEAD$#\1#p')
+				if [ -n "$UPSTREAM_DEFAULT_BRANCH" ]; then
+					UPSTREAM_BEHIND_COUNT=$(git -C "$OPS_DIR" rev-list --count "HEAD..upstream/$UPSTREAM_DEFAULT_BRANCH")
+					if [ "$UPSTREAM_BEHIND_COUNT" -gt 0 ]; then
+						echo "----------------------------------------"
+						echo "This fork is $UPSTREAM_BEHIND_COUNT commit(s) behind upstream/$UPSTREAM_DEFAULT_BRANCH:"
+						git -C "$OPS_DIR" log --oneline "HEAD..upstream/$UPSTREAM_DEFAULT_BRANCH"
+						read -p "Continue anyway without syncing? (y/N): " CONFIRM_UPSTREAM_STALE
+						if ! [[ "$CONFIRM_UPSTREAM_STALE" =~ ^[Yy]$ ]]; then
+							echo "Aborted. Sync this fork with upstream/$UPSTREAM_DEFAULT_BRANCH, then try again."
+							exit 1
+						fi
+					fi
+				fi
+			fi
+		fi
 	fi
 fi
 
