@@ -1,31 +1,81 @@
-# Card Judge - Infrastructure
+# gameshell-deploy
 
-These scripts will allow for easy create/restore and backup/delete of card judge instances.
+Shared deployment tooling for [gameshell-framework](https://github.com/gerp93/gameshell-framework)
+games. One source of truth for the create/restore and backup/delete process;
+all game configs and backups live in this repo, decoupled from application code.
+
+## Model
+
+This repo is a **control plane and artifact store**: it holds the deployment
+scripts, templates, and all per-game configuration and backup data. The generic
+process lives here; nothing game-specific lives in the application repos.
+
+- **Process** (here): `create.sh`, `delete.sh`, and the `templates/`
+  (`spec.yaml`, `setup.sh`). No game names or game-specific values.
+- **Config** (here): `games/{APP_NAME}/deploy.conf` — app name, env prefix, DB
+  name, port, git repo. See [examples/deploy.conf](examples/deploy.conf).
+- **Data** (here): `games/{APP_NAME}/backups/` directory of GPG-encrypted
+  database dumps (`*.sql.gpg`). Backups are optional; if none exist, a fresh
+  database is created and the app initializes the schema on startup.
 
 ## Prerequisites
 
-Have a [Digital Ocean](https://www.digitalocean.com/) account created.
+- A [Digital Ocean](https://www.digitalocean.com/) account with your SSH key added.
+- [doctl](https://docs.digitalocean.com/reference/doctl/how-to/install/) installed
+  and authenticated (`doctl auth init -t $TOKEN`), with app/droplet/ssh_key scopes.
+- `gpg` installed (backups are encrypted at rest).
 
-Ensure you have your system's ssh key added to your Digital Ocean account.
+## Usage
 
-Install [doctl](https://docs.digitalocean.com/reference/doctl/how-to/install/) on your system.
-
-Generate an API token with the following scope access:
-
-- app (full)
-- droplet (full)
-- ssh_key (read)
-
-Authenticate to your account using the generated token:
+Database credentials are passed via the environment so one operator setup works for any game:
 
 ```bash
-doctl auth init -t $TOKEN
+export DEPLOY_SQL_USER=...
+export DEPLOY_SQL_PASSWORD=...
+
+# create (restores the latest games/APP_NAME/backups/*.sql.gpg)
+./create.sh timeline-trivia
+./create.sh card-judge
+
+# back up and tear down
+./delete.sh timeline-trivia
+./delete.sh card-judge
 ```
 
-## [create.sh](create.sh)
+Just pass the app name; config and backups are read from `games/{APP_NAME}/`.
 
-Create a new instance of card judge and restore the database backup.
+Restoring/creating a backup decrypts/encrypts it with `gpg`, which normally
+prompts interactively for the passphrase — fine in a terminal. To run
+non-interactively (e.g. from a GUI wrapper with no TTY for pinentry), set
+`GPG_PASSPHRASE` too; both scripts then use `gpg --batch --passphrase-fd`
+instead of prompting.
 
-## [delete.sh](delete.sh)
+Both scripts also accept flags so GUI wrappers can drive them
+non-interactively — `create.sh` takes `--ssh-key=NAME`, `--tier=1|2|3`, and
+`--yes` (auto-confirms the fork-sync push); `delete.sh` takes
+`--backup=yes|no`. Omit any of them and the matching interactive prompt runs
+as normal.
 
-Backup the database and delete an existing instance of card judge.
+If `deploy.conf` sets `GIT_UPSTREAM` (a fork's upstream repo, `owner/name`),
+`create.sh` checks it for commits not yet in `GIT_REPO` and offers to push
+them across before deploying — no local checkout of either repo is needed,
+it fetches both directly by URL.
+
+## How env vars line up
+
+`ENV_PREFIX` in `deploy.conf` is the single value that keeps the app and its
+deployment in sync. The app reads its database settings through
+`database.SetEnvPrefix(ENV_PREFIX)` (in the game's `main.go`), and `create.sh`
+injects DO app env vars with matching keys — `${ENV_PREFIX}_SQL_HOST`,
+`_SQL_USER`, `_SQL_PASSWORD`, `_SQL_DATABASE`. Change it in one place.
+
+## Notes
+
+- The tracked templates are never mutated; `create.sh` renders them into temp
+  files per run.
+- Decrypted `*.sql` backups are git-ignored; `games/*/backups/` is git-ignored
+  entirely (encrypted `*.sql.gpg` included) — only `games/*/deploy.conf` is
+  tracked.
+- Version numbers are tracked per game (each repo keeps its own
+  `version_bump.sh` and README version line) — versioning is intentionally not
+  centralized here.

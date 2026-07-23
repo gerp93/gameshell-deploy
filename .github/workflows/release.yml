@@ -1,0 +1,138 @@
+name: Release GUI
+
+# Builds the Wails desktop GUI (gui/) for Windows, Linux, and macOS and
+# publishes all three as GitHub Release assets whenever a version tag is
+# pushed. The app itself is OS-agnostic (see gui/platform/platform_unix.go
+# vs platform_windows.go — only Windows shells through wsl.exe).
+#
+# To cut a release: git tag v1.2.3 && git push origin v1.2.3
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            platform: windows
+            binary: gameshell-deploy-gui.exe
+          - os: ubuntu-latest
+            platform: linux
+            binary: gameshell-deploy-gui
+          - os: macos-latest
+            platform: macos
+            binary: gameshell-deploy-gui
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Add Go bin to PATH
+        shell: bash
+        run: echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+      - name: Install Wails CLI
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@latest
+
+      # Ubuntu 24.04 (ubuntu-latest) only ships webkit2gtk 4.1's dev
+      # package, not the older 4.0 Wails v2 defaults to — build with the
+      # 4.1 tag to match. See https://wails.io/docs/gettingstarted/installation
+      # (Linux prerequisites) for why this differs from older distros.
+      - name: Install Linux build dependencies
+        if: matrix.platform == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev
+
+      - name: Build GUI
+        working-directory: gui
+        shell: bash
+        run: |
+          if [ "${{ matrix.platform }}" = "linux" ]; then
+            wails build -tags webkit2_41
+          else
+            wails build
+          fi
+
+      # Package the binary alongside the generic scripts/templates it needs
+      # at runtime (see gui/app.go's GetOpsDir — it walks up from its own
+      # location looking for these), plus the games/ stubs. Placing the
+      # binary at the package root means GetOpsDir finds everything on the
+      # first check, no gui/build/bin/ nesting required.
+      #
+      # macOS is the odd one out: wails build produces a *.app bundle (a
+      # directory), not a flat binary — the real executable is nested at
+      # <name>.app/Contents/MacOS/<name>. Ship the whole bundle so it stays
+      # a normal double-clickable Mac app; GetOpsDir still finds create.sh
+      # etc. two levels up from Contents/MacOS just fine (it walks up 6).
+      - name: Stage release package
+        shell: bash
+        run: |
+          set -e
+          VERSION="${GITHUB_REF_NAME}"
+          STAGE="gameshell-deploy-${VERSION}-${{ matrix.platform }}"
+          mkdir -p "$STAGE"
+          if [ "${{ matrix.platform }}" = "macos" ]; then
+            cp -r "gui/build/bin/${{ matrix.binary }}.app" "$STAGE/"
+            chmod +x "$STAGE/${{ matrix.binary }}.app/Contents/MacOS/${{ matrix.binary }}"
+          else
+            cp "gui/build/bin/${{ matrix.binary }}" "$STAGE/"
+            chmod +x "$STAGE/${{ matrix.binary }}" || true
+          fi
+          cp create.sh delete.sh README.md CLAUDE.md "$STAGE/"
+          cp -r templates examples games "$STAGE/"
+          # Never ship decrypted backups or a stray operator's encrypted
+          # ones — only the tracked games/*/deploy.conf + empty backups/
+          # dirs (.gitkeep) should be present, but strip defensively in
+          # case anything untracked snuck into the workspace.
+          find "$STAGE/games" -type f \( -name '*.sql' -o -name '*.gpg' \) -delete
+
+          if [ "${{ matrix.platform }}" = "windows" ]; then
+            7z a -tzip "${STAGE}.zip" "$STAGE" > /dev/null
+            echo "ASSET_PATH=${STAGE}.zip" >> "$GITHUB_ENV"
+          else
+            tar czf "${STAGE}.tar.gz" "$STAGE"
+            echo "ASSET_PATH=${STAGE}.tar.gz" >> "$GITHUB_ENV"
+          fi
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: package-${{ matrix.platform }}
+          path: ${{ env.ASSET_PATH }}
+
+  release:
+    needs: build
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all packages
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          pattern: package-*
+          merge-multiple: true
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true

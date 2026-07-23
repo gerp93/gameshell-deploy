@@ -18,22 +18,22 @@ region: nyc
 services:
 - dockerfile_path: Dockerfile
   envs:
-  - key: CARD_JUDGE_SQL_HOST
+  - key: REPLACE_ENV_PREFIX_SQL_HOST
     scope: RUN_AND_BUILD_TIME
-    value: REPLACE_CARD_JUDGE_SQL_HOST
-  - key: CARD_JUDGE_SQL_USER
+    value: REPLACE_SQL_HOST
+  - key: REPLACE_ENV_PREFIX_SQL_USER
     scope: RUN_AND_BUILD_TIME
-    value: REPLACE_CARD_JUDGE_SQL_USER
-  - key: CARD_JUDGE_SQL_PASSWORD
+    value: REPLACE_SQL_USER
+  - key: REPLACE_ENV_PREFIX_SQL_PASSWORD
     scope: RUN_AND_BUILD_TIME
-    value: REPLACE_CARD_JUDGE_SQL_PASSWORD
-  - key: CARD_JUDGE_SQL_DATABASE
+    value: REPLACE_SQL_PASSWORD
+  - key: REPLACE_ENV_PREFIX_SQL_DATABASE
     scope: RUN_AND_BUILD_TIME
-    value: CARD_JUDGE
+    value: REPLACE_DB_NAME
   github:
     branch: main
-    repo: REPLACE_CARD_JUDGE_GIT_REPO
-  http_port: 2016
+    repo: REPLACE_GIT_REPO
+  http_port: REPLACE_HTTP_PORT
   instance_count: 1
   instance_size_slug: REPLACE_APP_SIZE
   name: REPLACE_APP_NAME
