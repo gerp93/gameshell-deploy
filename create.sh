@@ -24,42 +24,51 @@ OPS_DIR="$(cd "$(dirname "$0")" && pwd)"
 # behavior changes land here too, so a stale checkout can run with outdated
 # logic. Only warns and confirms; never fetches destructively or merges.
 
-if git -C "$OPS_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-	if git -C "$OPS_DIR" fetch --quiet 2>/dev/null; then
-		if git -C "$OPS_DIR" rev-parse --abbrev-ref --symbolic-full-name '@{u}' >/dev/null 2>&1; then
-			BEHIND_COUNT=$(git -C "$OPS_DIR" rev-list --count 'HEAD..@{u}')
-			if [ "$BEHIND_COUNT" -gt 0 ]; then
-				echo "----------------------------------------"
-				echo "This gameshell-deploy checkout is $BEHIND_COUNT commit(s) behind its remote:"
-				git -C "$OPS_DIR" log --oneline 'HEAD..@{u}'
-				read -p "Continue anyway without updating? (y/N): " CONFIRM_STALE
-				if ! [[ "$CONFIRM_STALE" =~ ^[Yy]$ ]]; then
-					echo "Aborted. Run 'git pull' in $OPS_DIR to update, then try again."
-					exit 1
-				fi
-			fi
+echo "----------------------------------------"
+if ! git -C "$OPS_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+	echo "Not a git checkout, skipping remote check."
+elif ! git -C "$OPS_DIR" fetch --quiet 2>/dev/null; then
+	echo "Could not fetch origin (offline?), skipping remote check."
+elif ! git -C "$OPS_DIR" rev-parse --abbrev-ref --symbolic-full-name '@{u}' >/dev/null 2>&1; then
+	echo "No upstream tracking branch configured for origin, skipping remote check."
+else
+	BEHIND_COUNT=$(git -C "$OPS_DIR" rev-list --count 'HEAD..@{u}')
+	if [ "$BEHIND_COUNT" -gt 0 ]; then
+		echo "This gameshell-deploy checkout is $BEHIND_COUNT commit(s) behind its remote:"
+		git -C "$OPS_DIR" log --oneline 'HEAD..@{u}'
+		read -p "Continue anyway without updating? (y/N): " CONFIRM_STALE
+		if ! [[ "$CONFIRM_STALE" =~ ^[Yy]$ ]]; then
+			echo "Aborted. Run 'git pull' in $OPS_DIR to update, then try again."
+			exit 1
 		fi
+	else
+		echo "This gameshell-deploy checkout is up to date with its remote."
+	fi
+fi
 
-		# If this checkout is itself a fork (has a conventional "upstream"
-		# remote), check that too — same fetch-only, never-pull, confirm
-		# pattern, just against the original repo instead of the fork.
-		if git -C "$OPS_DIR" remote get-url upstream >/dev/null 2>&1; then
-			if git -C "$OPS_DIR" fetch --quiet upstream 2>/dev/null; then
-				UPSTREAM_DEFAULT_BRANCH=$(git -C "$OPS_DIR" ls-remote --symref upstream HEAD | sed -n 's#^ref: refs/heads/\(.*\)\tHEAD$#\1#p')
-				if [ -n "$UPSTREAM_DEFAULT_BRANCH" ]; then
-					UPSTREAM_BEHIND_COUNT=$(git -C "$OPS_DIR" rev-list --count "HEAD..upstream/$UPSTREAM_DEFAULT_BRANCH")
-					if [ "$UPSTREAM_BEHIND_COUNT" -gt 0 ]; then
-						echo "----------------------------------------"
-						echo "This fork is $UPSTREAM_BEHIND_COUNT commit(s) behind upstream/$UPSTREAM_DEFAULT_BRANCH:"
-						git -C "$OPS_DIR" log --oneline "HEAD..upstream/$UPSTREAM_DEFAULT_BRANCH"
-						read -p "Continue anyway without syncing? (y/N): " CONFIRM_UPSTREAM_STALE
-						if ! [[ "$CONFIRM_UPSTREAM_STALE" =~ ^[Yy]$ ]]; then
-							echo "Aborted. Sync this fork with upstream/$UPSTREAM_DEFAULT_BRANCH, then try again."
-							exit 1
-						fi
-					fi
-				fi
+# If this checkout is itself a fork (has a conventional "upstream" remote),
+# check that too — same fetch-only, never-pull, confirm pattern, just
+# against the original repo instead of the fork.
+if ! git -C "$OPS_DIR" remote get-url upstream >/dev/null 2>&1; then
+	echo "No 'upstream' remote configured (this checkout isn't a fork), skipping upstream check."
+elif ! git -C "$OPS_DIR" fetch --quiet upstream 2>/dev/null; then
+	echo "Could not fetch upstream (offline?), skipping upstream check."
+else
+	UPSTREAM_DEFAULT_BRANCH=$(git -C "$OPS_DIR" ls-remote --symref upstream HEAD | sed -n 's#^ref: refs/heads/\(.*\)\tHEAD$#\1#p')
+	if [ -z "$UPSTREAM_DEFAULT_BRANCH" ]; then
+		echo "Could not determine upstream's default branch, skipping upstream check."
+	else
+		UPSTREAM_BEHIND_COUNT=$(git -C "$OPS_DIR" rev-list --count "HEAD..upstream/$UPSTREAM_DEFAULT_BRANCH")
+		if [ "$UPSTREAM_BEHIND_COUNT" -gt 0 ]; then
+			echo "This fork is $UPSTREAM_BEHIND_COUNT commit(s) behind upstream/$UPSTREAM_DEFAULT_BRANCH:"
+			git -C "$OPS_DIR" log --oneline "HEAD..upstream/$UPSTREAM_DEFAULT_BRANCH"
+			read -p "Continue anyway without syncing? (y/N): " CONFIRM_UPSTREAM_STALE
+			if ! [[ "$CONFIRM_UPSTREAM_STALE" =~ ^[Yy]$ ]]; then
+				echo "Aborted. Sync this fork with upstream/$UPSTREAM_DEFAULT_BRANCH, then try again."
+				exit 1
 			fi
+		else
+			echo "This fork is up to date with upstream/$UPSTREAM_DEFAULT_BRANCH."
 		fi
 	fi
 fi
