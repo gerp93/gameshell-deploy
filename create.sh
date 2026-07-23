@@ -17,6 +17,31 @@ set -e # exit on any command error
 
 OPS_DIR="$(cd "$(dirname "$0")" && pwd)"
 
+################################################################################
+# check for new commits on this checkout's remote (never pulls automatically)
+#
+# This is gameshell-deploy's own git history, not the game's — bug fixes and
+# behavior changes land here too, so a stale checkout can run with outdated
+# logic. Only warns and confirms; never fetches destructively or merges.
+
+if git -C "$OPS_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+	if git -C "$OPS_DIR" fetch --quiet 2>/dev/null; then
+		if git -C "$OPS_DIR" rev-parse --abbrev-ref --symbolic-full-name '@{u}' >/dev/null 2>&1; then
+			BEHIND_COUNT=$(git -C "$OPS_DIR" rev-list --count 'HEAD..@{u}')
+			if [ "$BEHIND_COUNT" -gt 0 ]; then
+				echo "----------------------------------------"
+				echo "This gameshell-deploy checkout is $BEHIND_COUNT commit(s) behind its remote:"
+				git -C "$OPS_DIR" log --oneline 'HEAD..@{u}'
+				read -p "Continue anyway without updating? (y/N): " CONFIRM_STALE
+				if ! [[ "$CONFIRM_STALE" =~ ^[Yy]$ ]]; then
+					echo "Aborted. Run 'git pull' in $OPS_DIR to update, then try again."
+					exit 1
+				fi
+			fi
+		fi
+	fi
+fi
+
 APP_NAME_ARG="${1:?Usage: ./create.sh APP_NAME}"
 GAME_CONFIG_DIR="$OPS_DIR/games/$APP_NAME_ARG"
 
