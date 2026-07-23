@@ -161,6 +161,13 @@ fi
 
 ################################################################################
 # get price tier
+#
+# These AMD droplet sizes aren't sold in every DO region (notably not in
+# nyc3, the default DROPLET_REGION), so `doctl compute droplet create` can
+# fail with a 422 for a tier that looks fine here. The 3 arrays below are
+# parallel and index-aligned (TIER_SLUGS[i]/TIER_APP_SIZES[i]/TIER_LABELS[i]
+# all describe the same tier) — this is the one place tier definitions live;
+# everything downstream, including the 422 handling later, reads from here.
 
 echo "----------------------------------------"
 
@@ -168,10 +175,13 @@ TIER_SLUGS=("s-1vcpu-1gb-amd" "s-2vcpu-4gb-amd" "s-4vcpu-8gb-amd")
 TIER_APP_SIZES=("basic-xs" "basic-s" "basic-m")
 TIER_LABELS=("\$17/month, \$0.02518/hour" "\$48/month, \$0.07155/hour" "\$96/month, \$0.14273/hour")
 
+# AVAILABLE_TIERS holds indices into TIER_SLUGS/TIER_APP_SIZES/TIER_LABELS
+# (not the tiers themselves), so the menu below can renumber 1..N over
+# however many tiers survive the check, however many that turns out to be.
 if ! command -v jq >/dev/null 2>&1; then
 	echo "*** No jq found, skipping tier availability pre-check ***"
 	echo "Install jq (e.g. 'brew install jq' on macOS, 'apt install jq' on Debian/Ubuntu) to run the tier availability pre-check against the configured region on future runs."
-	AVAILABLE_TIERS=(0 1 2)
+	AVAILABLE_TIERS=(0 1 2) # no check ran, so assume all 3 are valid like before
 else
 	# "slug region" pairs, one per line, covering all 3 tiers at once. This
 	# doesn't depend on DROPLET_REGION, so it's fetched once even if the loop
@@ -225,6 +235,8 @@ if ! [[ "$PRICE_TIER_CHOICE" =~ ^[0-9]+$ ]] || [ "$PRICE_TIER_CHOICE" -lt 1 ] ||
 	exit 1
 fi
 
+# PRICE_TIER_CHOICE is the displayed 1..N menu position; map it back through
+# AVAILABLE_TIERS to the real index into TIER_SLUGS/TIER_APP_SIZES.
 TIER_INDEX="${AVAILABLE_TIERS[$((PRICE_TIER_CHOICE - 1))]}"
 DROPLET_SIZE="${TIER_SLUGS[$TIER_INDEX]}"
 APP_SIZE="${TIER_APP_SIZES[$TIER_INDEX]}"
