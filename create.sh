@@ -76,6 +76,13 @@ fi
 
 ################################################################################
 # render templates into temp copies (tracked templates are never mutated)
+#
+# Older versions of this script sed -i'd the secrets directly into the
+# tracked templates/*.sh|yaml and ran `git checkout --` on them afterward to
+# revert. That left real credentials sitting in a git-tracked file for the
+# whole run, with no cleanup if the script died before reaching the revert.
+# Rendering into a mktemp copy plus an EXIT trap means the tracked template
+# is never touched and the copy is deleted no matter how the script exits.
 
 SETUP_SCRIPT_PATH=$(mktemp)
 APP_SPEC_PATH=$(mktemp)
@@ -107,6 +114,9 @@ if [[ -n "$GIT_UPSTREAM" && "$GIT_UPSTREAM" != "$GIT_REPO" ]]; then
 		cd "$SYNC_DIR"
 		git init -q
 
+		# Old card-judge-only version of this script hardcoded "main" here.
+		# This is generic across games now, so the default branch can't be
+		# assumed — detect it instead of hardcoding it.
 		DEFAULT_BRANCH=$(git ls-remote --symref "$GIT_REPO_URL" HEAD | sed -n 's#^ref: refs/heads/\(.*\)\tHEAD$#\1#p')
 		: "${DEFAULT_BRANCH:?could not determine default branch of $GIT_REPO}"
 

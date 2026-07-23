@@ -17,6 +17,10 @@ name: REPLACE_APP_NAME
 region: nyc
 services:
 - dockerfile_path: Dockerfile
+  # Two separate substitutions per line, not one: REPLACE_ENV_VAR_PREFIX (the
+  # game's database.SetEnvVarPrefix(...) value, e.g. TIMELINE_TRIVIA) becomes
+  # part of the env var KEY, while REPLACE_SQL_HOST/USER/PASSWORD/REPLACE_DB_NAME
+  # are separate placeholders for the VALUES.
   envs:
   - key: REPLACE_ENV_VAR_PREFIX_SQL_HOST
     scope: RUN_AND_BUILD_TIME
