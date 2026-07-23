@@ -21,8 +21,15 @@ process lives here; nothing game-specific lives in the application repos.
 ## Prerequisites
 
 - A [Digital Ocean](https://www.digitalocean.com/) account with your SSH key added.
-- [doctl](https://docs.digitalocean.com/reference/doctl/how-to/install/) installed
-  and authenticated (`doctl auth init -t $TOKEN`), with app/droplet/ssh_key scopes.
+- [doctl](https://docs.digitalocean.com/reference/doctl/how-to/install/) installed,
+  authenticated with a token generated with the following scope access:
+  - app (full)
+  - droplet (full)
+  - ssh_key (read)
+
+  ```bash
+  doctl auth init -t $TOKEN
+  ```
 - `gpg` installed (backups are encrypted at rest).
 
 ## Usage
