@@ -35,7 +35,7 @@ encrypts database backups at rest.
   game's name, env prefix, or port in these files, that value belongs in
   `games/APP_NAME/deploy.conf` instead.
 - **Config** (this repo, per-game, tracked): `games/APP_NAME/deploy.conf`,
-  copied from [examples/deploy.conf](examples/deploy.conf) — `APP_NAME`,
+  copied from [deploy.conf.template](deploy.conf.template) — `APP_NAME`,
   `ENV_VAR_PREFIX`, `DB_NAME`, `HTTP_PORT`, `GIT_REPO`, optional `GIT_UPSTREAM`/
   droplet overrides. Only non-secret values live in `deploy.conf`, so it's
   safe to commit.

@@ -1,7 +1,7 @@
 // Package deployconf reads and writes a game's games/APP_NAME/deploy.conf
 // without disturbing its comments or key ordering — it rewrites only the
 // values on recognized KEY= lines, leaving everything else (including
-// examples/deploy.conf's documentation comments) untouched.
+// deploy.conf.template's documentation comments) untouched.
 package deployconf
 
 import (
@@ -13,7 +13,7 @@ import (
 	"strings"
 )
 
-// DeployConf mirrors the keys documented in examples/deploy.conf.
+// DeployConf mirrors the keys documented in deploy.conf.template.
 type DeployConf struct {
 	AppName       string `json:"appName"`
 	EnvVarPrefix  string `json:"envVarPrefix"`
@@ -82,7 +82,7 @@ func Load(path string) (DeployConf, error) {
 	return conf, scanner.Err()
 }
 
-// CreateFromTemplate copies templatePath (examples/deploy.conf) to destPath,
+// CreateFromTemplate copies templatePath (deploy.conf.template) to destPath,
 // only if destPath doesn't already exist.
 func CreateFromTemplate(templatePath, destPath string) error {
 	if Exists(destPath) {

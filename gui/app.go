@@ -59,7 +59,7 @@ func (a *App) GetOpsDir() (string, error) {
 		}
 		dir = parent
 	}
-	return "", fmt.Errorf("could not find a gameshell-deploy checkout (create.sh, delete.sh, templates/, examples/) above %s", filepath.Dir(exe))
+	return "", fmt.Errorf("could not find a gameshell-deploy checkout (create.sh, delete.sh, templates/, deploy.conf.template) above %s", filepath.Dir(exe))
 }
 
 // OpenOpsDir opens opsDir in the host's file manager (Explorer/Finder), so
@@ -74,7 +74,7 @@ func validateOpsDir(dir string) error {
 		"delete.sh",
 		filepath.Join("templates", "setup.sh"),
 		filepath.Join("templates", "spec.yaml"),
-		filepath.Join("examples", "deploy.conf"),
+		filepath.Join("deploy.conf.template"),
 	}
 	for _, rel := range required {
 		if _, err := os.Stat(filepath.Join(dir, rel)); err != nil {
@@ -173,7 +173,7 @@ func (a *App) LoadDeployConf(opsDir, appName string) (DeployConfResult, error) {
 }
 
 // CreateDeployConf creates games/appName/ (and its backups/ subdirectory),
-// copies OpsDir/examples/deploy.conf into it, and applies conf's values on
+// copies OpsDir/deploy.conf.template into it, and applies conf's values on
 // top of it.
 func (a *App) CreateDeployConf(opsDir, appName string, conf deployconf.DeployConf) error {
 	if errs := deployconf.Validate(conf); len(errs) > 0 {
@@ -183,7 +183,7 @@ func (a *App) CreateDeployConf(opsDir, appName string, conf deployconf.DeployCon
 	if err := os.MkdirAll(filepath.Join(configDir, "backups"), 0o755); err != nil {
 		return err
 	}
-	templatePath := filepath.Join(opsDir, "examples", "deploy.conf")
+	templatePath := filepath.Join(opsDir, "deploy.conf.template")
 	destPath := filepath.Join(configDir, "deploy.conf")
 	if err := deployconf.CreateFromTemplate(templatePath, destPath); err != nil {
 		return err
