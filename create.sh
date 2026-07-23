@@ -153,29 +153,71 @@ fi
 # get price tier
 
 echo "----------------------------------------"
+
+TIER_SLUGS=("s-1vcpu-1gb-amd" "s-2vcpu-4gb-amd" "s-4vcpu-8gb-amd")
+TIER_APP_SIZES=("basic-xs" "basic-s" "basic-m")
+TIER_LABELS=("\$17/month, \$0.02518/hour" "\$48/month, \$0.07155/hour" "\$96/month, \$0.14273/hour")
+
+if ! command -v jq >/dev/null 2>&1; then
+	echo "*** No jq found, skipping tier availability pre-check ***"
+	echo "Install jq (e.g. 'brew install jq' on macOS, 'apt install jq' on Debian/Ubuntu) to run the tier availability pre-check against the configured region on future runs."
+	AVAILABLE_TIERS=(0 1 2)
+else
+	# "slug region" pairs, one per line, covering all 3 tiers at once. This
+	# doesn't depend on DROPLET_REGION, so it's fetched once even if the loop
+	# below retries with a different region.
+	TIER_SLUGS_JSON=$(printf '%s\n' "${TIER_SLUGS[@]}" | jq -R . | jq -s .)
+	TIER_REGION_PAIRS=$(doctl compute size list -o json | jq -r --argjson slugs "$TIER_SLUGS_JSON" '
+		.[] | select(.slug as $s | $slugs | index($s)) | .slug as $s | .regions[] | "\($s) \(.)"
+	')
+	TIER_REGIONS=$(echo "$TIER_REGION_PAIRS" | awk '{print $2}' | sort -u)
+
+	echo "Checking which price tiers are currently available in region $DROPLET_REGION..."
+	while true; do
+		AVAILABLE_TIERS=()
+		for i in 0 1 2; do
+			if echo "$TIER_REGION_PAIRS" | grep -qx "${TIER_SLUGS[$i]} $DROPLET_REGION"; then
+				AVAILABLE_TIERS+=("$i")
+			fi
+		done
+
+		if [ ${#AVAILABLE_TIERS[@]} -gt 0 ]; then
+			break
+		fi
+
+		echo "None of the pre-defined price tiers (${TIER_SLUGS[*]}) are available in the configured region ($DROPLET_REGION)"
+		echo "Set DROPLET_REGION in games/$APP_NAME_ARG/deploy.conf, or choose a different region below:"
+		echo "Other Regions where at least one of these tiers is currently available:"
+		doctl compute region list --format=Slug,Name --no-header | while read -r RSLUG RNAME; do
+			if echo "$TIER_REGIONS" | grep -qx "$RSLUG"; then
+				echo "  $RSLUG - $RNAME"
+			fi
+		done
+		read -p "Enter a different region code to check (or leave blank to abort): " NEW_DROPLET_REGION
+		if [[ -z "$NEW_DROPLET_REGION" ]]; then
+			echo "Update DROPLET_REGION in games/$APP_NAME_ARG/deploy.conf to one of the above and try again."
+			exit 1
+		fi
+		DROPLET_REGION="$NEW_DROPLET_REGION"
+		echo "Checking which price tiers are currently available in region $DROPLET_REGION..."
+	done
+fi
+
 echo "Choose price tier to host:"
-echo "1) \$17/month, \$0.02518/hour"
-echo "2) \$48/month, \$0.07155/hour"
-echo "3) \$96/month, \$0.14273/hour"
+for n in "${!AVAILABLE_TIERS[@]}"; do
+	i="${AVAILABLE_TIERS[$n]}"
+	echo "$((n + 1))) ${TIER_LABELS[$i]}"
+done
 read -p "Choice: " PRICE_TIER_CHOICE
-case "$PRICE_TIER_CHOICE" in
-	1)
-		DROPLET_SIZE="s-1vcpu-1gb-amd"
-		APP_SIZE="basic-xs"
-		;;
-	2)
-		DROPLET_SIZE="s-2vcpu-4gb-amd"
-		APP_SIZE="basic-s"
-		;;
-	3)
-		DROPLET_SIZE="s-4vcpu-8gb-amd"
-		APP_SIZE="basic-m"
-		;;
-	*)
-		echo "Invalid price tier choice [1|2|3]"
-		exit 1
-		;;
-esac
+
+if ! [[ "$PRICE_TIER_CHOICE" =~ ^[0-9]+$ ]] || [ "$PRICE_TIER_CHOICE" -lt 1 ] || [ "$PRICE_TIER_CHOICE" -gt "${#AVAILABLE_TIERS[@]}" ]; then
+	echo "Invalid price tier choice"
+	exit 1
+fi
+
+TIER_INDEX="${AVAILABLE_TIERS[$((PRICE_TIER_CHOICE - 1))]}"
+DROPLET_SIZE="${TIER_SLUGS[$TIER_INDEX]}"
+APP_SIZE="${TIER_APP_SIZES[$TIER_INDEX]}"
 
 ################################################################################
 # create droplet
@@ -188,6 +230,7 @@ if doctl compute droplet list --format=Name --no-header | grep -q "$DROPLET_NAME
 	exit 1
 fi
 
+set +e
 DROPLET_IP=$(
 	doctl compute droplet create "$DROPLET_NAME" \
 		--ssh-keys="$SSH_KEY_ID" \
@@ -197,8 +240,22 @@ DROPLET_IP=$(
 		--user-data-file="$SETUP_SCRIPT_PATH" \
 		--format=PublicIPv4 \
 		--no-header \
-		--wait
+		--wait 2>&1
 )
+DROPLET_CREATE_STATUS=$?
+set -e
+
+if [ "$DROPLET_CREATE_STATUS" -ne 0 ]; then
+	echo "$DROPLET_IP"
+	if echo "$DROPLET_IP" | grep -q "Size is not available in this region"; then
+		echo "DROPLET_SIZE ($DROPLET_SIZE) is not available in region ($DROPLET_REGION)."
+		echo "Update DROPLET_REGION in games/$APP_NAME_ARG/deploy.conf to a region that supports this size and try again."
+		if ! command -v jq >/dev/null 2>&1; then
+			echo "Install jq (e.g. 'brew install jq' on macOS, 'apt install jq' on Debian/Ubuntu) to catch this ahead of time via the tier availability pre-check."
+		fi
+	fi
+	exit 1
+fi
 
 if [[ -z "$DROPLET_IP" ]]; then
 	sleep 10
