@@ -153,29 +153,83 @@ fi
 # get price tier
 
 echo "----------------------------------------"
-echo "Choose price tier to host:"
-echo "1) \$17/month, \$0.02518/hour"
-echo "2) \$48/month, \$0.07155/hour"
-echo "3) \$96/month, \$0.14273/hour"
-read -p "Choice: " PRICE_TIER_CHOICE
-case "$PRICE_TIER_CHOICE" in
-	1)
-		DROPLET_SIZE="s-1vcpu-1gb-amd"
-		APP_SIZE="basic-xs"
-		;;
-	2)
-		DROPLET_SIZE="s-2vcpu-4gb-amd"
-		APP_SIZE="basic-s"
-		;;
-	3)
-		DROPLET_SIZE="s-4vcpu-8gb-amd"
-		APP_SIZE="basic-m"
-		;;
-	*)
-		echo "Invalid price tier choice [1|2|3]"
+echo "Checking which price tiers are currently available in region $DROPLET_REGION..."
+
+TIER_SLUGS=("s-1vcpu-1gb-amd" "s-2vcpu-4gb-amd" "s-4vcpu-8gb-amd")
+TIER_APP_SIZES=("basic-xs" "basic-s" "basic-m")
+TIER_LABELS=("\$17/month, \$0.02518/hour" "\$48/month, \$0.07155/hour" "\$96/month, \$0.14273/hour")
+
+SIZE_LIST_JSON=$(doctl compute size list -o json)
+
+# doctl has no --format column for a size's region list (only -o json exposes
+# it), and this repo has no jq dependency, so scrape the pretty-printed JSON
+# directly: find the matching "slug" line, then look for DROPLET_REGION inside
+# the "regions": [ ... ] block that immediately follows it.
+AVAILABLE_TIERS=()
+while true; do
+	AVAILABLE_TIERS=()
+	for i in 0 1 2; do
+		SLUG="${TIER_SLUGS[$i]}"
+		if echo "$SIZE_LIST_JSON" | awk -v slug="\"${SLUG}\"," -v region="\"${DROPLET_REGION}\"" '
+			$0 ~ ("\"slug\": " slug) { in_slug=1 }
+			in_slug && /"regions": \[/ { in_regions=1; next }
+			in_regions && /\]/ { exit }
+			in_regions && index($0, region) { found=1; exit }
+			END { exit !found }
+		'; then
+			AVAILABLE_TIERS+=("$i")
+		fi
+	done
+
+	if [ ${#AVAILABLE_TIERS[@]} -gt 0 ]; then
+		break
+	fi
+
+	echo "None of the pre-defined price tiers (${TIER_SLUGS[*]}) are available in the configured region ($DROPLET_REGION)"
+	echo "Set DROPLET_REGION in games/$APP_NAME_ARG/deploy.conf, or choose a different region below:"
+	echo "Other Regions where at least one of these tiers is currently available:"
+	# Union of the "regions" arrays across all TIER_SLUGS, so we only suggest a
+	# region that will actually pass the check above instead of any DO region.
+	TIER_REGIONS=$(echo "$SIZE_LIST_JSON" | awk -v slugs="${TIER_SLUGS[*]}" '
+		BEGIN { n = split(slugs, arr, " "); for (i=1;i<=n;i++) want["\"" arr[i] "\","] = 1 }
+		{
+			if ($0 ~ /"slug": "/) {
+				in_slug = 0
+				for (k in want) { if (index($0, "\"slug\": " k) > 0) in_slug = 1 }
+			}
+			if (in_slug && /"regions": \[/) { in_regions=1; in_slug=0; next }
+			if (in_regions && /\]/) { in_regions=0 }
+			else if (in_regions) { line=$0; gsub(/[ \t",]/,"",line); print line }
+		}
+	' | sort -u)
+	doctl compute region list --format=Slug,Name --no-header | while read -r RSLUG RNAME; do
+		if echo "$TIER_REGIONS" | grep -qx "$RSLUG"; then
+			echo "  $RSLUG - $RNAME"
+		fi
+	done
+	read -p "Enter a different region code to check (or leave blank to abort): " NEW_DROPLET_REGION
+	if [[ -z "$NEW_DROPLET_REGION" ]]; then
 		exit 1
-		;;
-esac
+	fi
+	DROPLET_REGION="$NEW_DROPLET_REGION"
+	echo "Checking which price tiers are currently available in region $DROPLET_REGION..."
+done
+
+echo "Choose price tier to host:"
+for n in "${!AVAILABLE_TIERS[@]}"; do
+	i="${AVAILABLE_TIERS[$n]}"
+	echo "$((n + 1))) ${TIER_LABELS[$i]}"
+done
+read -p "Choice: " PRICE_TIER_CHOICE
+
+if ! [[ "$PRICE_TIER_CHOICE" =~ ^[0-9]+$ ]] || [ "$PRICE_TIER_CHOICE" -lt 1 ] || [ "$PRICE_TIER_CHOICE" -gt "${#AVAILABLE_TIERS[@]}" ]; then
+	echo "Invalid price tier choice"
+	exit 1
+fi
+
+TIER_INDEX="${AVAILABLE_TIERS[$((PRICE_TIER_CHOICE - 1))]}"
+DROPLET_SIZE="${TIER_SLUGS[$TIER_INDEX]}"
+APP_SIZE="${TIER_APP_SIZES[$TIER_INDEX]}"
 
 ################################################################################
 # create droplet
