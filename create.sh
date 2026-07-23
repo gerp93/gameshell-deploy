@@ -159,24 +159,28 @@ TIER_SLUGS=("s-1vcpu-1gb-amd" "s-2vcpu-4gb-amd" "s-4vcpu-8gb-amd")
 TIER_APP_SIZES=("basic-xs" "basic-s" "basic-m")
 TIER_LABELS=("\$17/month, \$0.02518/hour" "\$48/month, \$0.07155/hour" "\$96/month, \$0.14273/hour")
 
-SIZE_LIST_JSON=$(doctl compute size list -o json)
-
 # doctl has no --format column for a size's region list (only -o json exposes
 # it), and this repo has no jq dependency, so scrape the pretty-printed JSON
-# directly: find the matching "slug" line, then look for DROPLET_REGION inside
-# the "regions": [ ... ] block that immediately follows it.
-AVAILABLE_TIERS=()
+# once into "slug region" pairs, one per line, covering all 3 tiers at once.
+TIER_REGION_PAIRS=$(doctl compute size list -o json | awk -v slugs="${TIER_SLUGS[*]}" '
+	BEGIN { n = split(slugs, arr, " "); for (i = 1; i <= n; i++) want[arr[i]] = 1 }
+	/"slug": "/ {
+		line = $0
+		sub(/^[ \t]*"slug": "/, "", line); sub(/",?$/, "", line)
+		cur = (line in want) ? line : ""
+		in_regions = 0
+		next
+	}
+	cur != "" && /"regions": \[/ { in_regions = 1; next }
+	in_regions && /\]/ { in_regions = 0; cur = ""; next }
+	in_regions { r = $0; gsub(/[ \t",]/, "", r); print cur, r }
+')
+TIER_REGIONS=$(echo "$TIER_REGION_PAIRS" | awk '{print $2}' | sort -u)
+
 while true; do
 	AVAILABLE_TIERS=()
 	for i in 0 1 2; do
-		SLUG="${TIER_SLUGS[$i]}"
-		if echo "$SIZE_LIST_JSON" | awk -v slug="\"${SLUG}\"," -v region="\"${DROPLET_REGION}\"" '
-			$0 ~ ("\"slug\": " slug) { in_slug=1 }
-			in_slug && /"regions": \[/ { in_regions=1; next }
-			in_regions && /\]/ { exit }
-			in_regions && index($0, region) { found=1; exit }
-			END { exit !found }
-		'; then
+		if echo "$TIER_REGION_PAIRS" | grep -qx "${TIER_SLUGS[$i]} $DROPLET_REGION"; then
 			AVAILABLE_TIERS+=("$i")
 		fi
 	done
@@ -188,20 +192,6 @@ while true; do
 	echo "None of the pre-defined price tiers (${TIER_SLUGS[*]}) are available in the configured region ($DROPLET_REGION)"
 	echo "Set DROPLET_REGION in games/$APP_NAME_ARG/deploy.conf, or choose a different region below:"
 	echo "Other Regions where at least one of these tiers is currently available:"
-	# Union of the "regions" arrays across all TIER_SLUGS, so we only suggest a
-	# region that will actually pass the check above instead of any DO region.
-	TIER_REGIONS=$(echo "$SIZE_LIST_JSON" | awk -v slugs="${TIER_SLUGS[*]}" '
-		BEGIN { n = split(slugs, arr, " "); for (i=1;i<=n;i++) want["\"" arr[i] "\","] = 1 }
-		{
-			if ($0 ~ /"slug": "/) {
-				in_slug = 0
-				for (k in want) { if (index($0, "\"slug\": " k) > 0) in_slug = 1 }
-			}
-			if (in_slug && /"regions": \[/) { in_regions=1; in_slug=0; next }
-			if (in_regions && /\]/) { in_regions=0 }
-			else if (in_regions) { line=$0; gsub(/[ \t",]/,"",line); print line }
-		}
-	' | sort -u)
 	doctl compute region list --format=Slug,Name --no-header | while read -r RSLUG RNAME; do
 		if echo "$TIER_REGIONS" | grep -qx "$RSLUG"; then
 			echo "  $RSLUG - $RNAME"
