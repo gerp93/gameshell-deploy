@@ -98,7 +98,7 @@ jobs:
             chmod +x "$STAGE/${{ matrix.binary }}" || true
           fi
           cp create.sh delete.sh README.md CLAUDE.md "$STAGE/"
-          cp -r templates examples games "$STAGE/"
+          cp -r templates deploy.conf.template games "$STAGE/"
           # Never ship decrypted backups or a stray operator's encrypted
           # ones — only the tracked games/*/deploy.conf + empty backups/
           # dirs (.gitkeep) should be present, but strip defensively in

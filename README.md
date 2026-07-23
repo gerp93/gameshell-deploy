@@ -13,7 +13,7 @@ process lives here; nothing game-specific lives in the application repos.
 - **Process** (here): `create.sh`, `delete.sh`, and the `templates/`
   (`spec.yaml`, `setup.sh`). No game names or game-specific values.
 - **Config** (here): `games/{APP_NAME}/deploy.conf` — app name, env prefix, DB
-  name, port, git repo. See [examples/deploy.conf](examples/deploy.conf).
+  name, port, git repo. See [deploy.conf.template](deploy.conf.template).
 - **Data** (here): `games/{APP_NAME}/backups/` directory of GPG-encrypted
   database dumps (`*.sql.gpg`). Backups are optional; if none exist, a fresh
   database is created and the app initializes the schema on startup.

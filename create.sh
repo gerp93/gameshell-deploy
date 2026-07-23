@@ -5,7 +5,7 @@
 # Usage:  ./create.sh APP_NAME [--ssh-key=NAME] [--tier=1|2|3] [--yes]
 #   APP_NAME is the game name (e.g., timeline-trivia, card-judge). Config and
 #   backups are read from games/APP_NAME/ relative to this script — deploy.conf
-#   (see examples/deploy.conf) and a backups/ directory holding at least one
+#   (see deploy.conf.template) and a backups/ directory holding at least one
 #   GPG-encrypted database backup (*.sql.gpg).
 #
 #   --ssh-key=NAME  skip the SSH key prompt, use this key name
