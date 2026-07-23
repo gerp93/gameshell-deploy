@@ -3,7 +3,7 @@ import { state, notify } from "./state";
 
 const emptyConf: DeployConf = {
   appName: "",
-  envPrefix: "",
+  envVarPrefix: "",
   dbName: "",
   httpPort: "",
   gitRepo: "",
@@ -15,7 +15,7 @@ const emptyConf: DeployConf = {
 
 const fieldDefs: Array<{ key: keyof DeployConf; label: string; required: boolean }> = [
   { key: "appName", label: "APP_NAME", required: true },
-  { key: "envPrefix", label: "ENV_PREFIX", required: true },
+  { key: "envVarPrefix", label: "ENV_VAR_PREFIX", required: true },
   { key: "dbName", label: "DB_NAME", required: true },
   { key: "httpPort", label: "HTTP_PORT", required: true },
   { key: "gitRepo", label: "GIT_REPO (owner/name)", required: true },

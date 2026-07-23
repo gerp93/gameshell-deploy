@@ -63,10 +63,10 @@ it fetches both directly by URL.
 
 ## How env vars line up
 
-`ENV_PREFIX` in `deploy.conf` is the single value that keeps the app and its
+`ENV_VAR_PREFIX` in `deploy.conf` is the single value that keeps the app and its
 deployment in sync. The app reads its database settings through
-`database.SetEnvPrefix(ENV_PREFIX)` (in the game's `main.go`), and `create.sh`
-injects DO app env vars with matching keys — `${ENV_PREFIX}_SQL_HOST`,
+`database.SetEnvVarPrefix(ENV_VAR_PREFIX)` (in the game's `main.go`), and `create.sh`
+injects DO app env vars with matching keys — `${ENV_VAR_PREFIX}_SQL_HOST`,
 `_SQL_USER`, `_SQL_PASSWORD`, `_SQL_DATABASE`. Change it in one place.
 
 ## Notes

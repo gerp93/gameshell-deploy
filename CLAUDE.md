@@ -36,7 +36,7 @@ encrypts database backups at rest.
   `games/APP_NAME/deploy.conf` instead.
 - **Config** (this repo, per-game, tracked): `games/APP_NAME/deploy.conf`,
   copied from [examples/deploy.conf](examples/deploy.conf) — `APP_NAME`,
-  `ENV_PREFIX`, `DB_NAME`, `HTTP_PORT`, `GIT_REPO`, optional `GIT_UPSTREAM`/
+  `ENV_VAR_PREFIX`, `DB_NAME`, `HTTP_PORT`, `GIT_REPO`, optional `GIT_UPSTREAM`/
   droplet overrides. Only non-secret values live in `deploy.conf`, so it's
   safe to commit.
 - **Data** (this repo, per-game, git-ignored): `games/APP_NAME/backups/`, a
@@ -59,11 +59,11 @@ encrypts database backups at rest.
   without this branch — it's the only thing keeping the GUI's fully
   non-interactive flow working.
 
-`ENV_PREFIX` is the one value that has to match across repos: the game reads
-its DB settings via `database.SetEnvPrefix(ENV_PREFIX)` in its own `main.go`
+`ENV_VAR_PREFIX` is the one value that has to match across repos: the game reads
+its DB settings via `database.SetEnvVarPrefix(ENV_VAR_PREFIX)` in its own `main.go`
 (gameshell-framework convention), and `create.sh` injects the DO app's env
-vars using that same prefix (`${ENV_PREFIX}_SQL_HOST`, `_SQL_USER`, etc.).
-Changing a game's `ENV_PREFIX` is a two-repo change.
+vars using that same prefix (`${ENV_VAR_PREFIX}_SQL_HOST`, `_SQL_USER`, etc.).
+Changing a game's `ENV_VAR_PREFIX` is a two-repo change.
 
 `GIT_REPO`/`GIT_UPSTREAM` in `deploy.conf` are enough on their own to deploy
 and fork-sync a game — DO App Platform clones `GIT_REPO` directly, and
