@@ -31,6 +31,10 @@ process lives here; nothing game-specific lives in the application repos.
   doctl auth init -t $TOKEN
   ```
 - `gpg` installed (backups are encrypted at rest).
+- `jq` installed (optional) — lets `create.sh` pre-check which price tiers are
+  actually available in the configured Digital Ocean region before asking;
+  without it, this check is skipped and a bad tier/region combination only
+  surfaces as a failure from `doctl` at create time.
 
 ## Usage
 
