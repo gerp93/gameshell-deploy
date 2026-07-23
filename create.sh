@@ -62,7 +62,7 @@ fi
 source "$CONFIG_PATH"
 
 : "${APP_NAME:?deploy.conf must set APP_NAME}"
-: "${ENV_PREFIX:?deploy.conf must set ENV_PREFIX}"
+: "${ENV_VAR_PREFIX:?deploy.conf must set ENV_VAR_PREFIX}"
 : "${DB_NAME:?deploy.conf must set DB_NAME}"
 : "${HTTP_PORT:?deploy.conf must set HTTP_PORT}"
 : "${GIT_REPO:?deploy.conf must set GIT_REPO}"
@@ -332,7 +332,7 @@ fi
 
 sed \
 	-e "s/REPLACE_APP_NAME/${APP_NAME}/g" \
-	-e "s/REPLACE_ENV_PREFIX/${ENV_PREFIX}/g" \
+	-e "s/REPLACE_ENV_VAR_PREFIX/${ENV_VAR_PREFIX}/g" \
 	-e "s/REPLACE_SQL_HOST/${DROPLET_IP}/g" \
 	-e "s/REPLACE_SQL_USER/${DEPLOY_SQL_USER}/g" \
 	-e "s/REPLACE_SQL_PASSWORD/${DEPLOY_SQL_PASSWORD}/g" \

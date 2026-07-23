@@ -16,7 +16,7 @@ import (
 // DeployConf mirrors the keys documented in examples/deploy.conf.
 type DeployConf struct {
 	AppName       string `json:"appName"`
-	EnvPrefix     string `json:"envPrefix"`
+	EnvVarPrefix  string `json:"envVarPrefix"`
 	DBName        string `json:"dbName"`
 	HTTPPort      string `json:"httpPort"`
 	GitRepo       string `json:"gitRepo"`
@@ -33,7 +33,7 @@ type field struct {
 
 var fields = []field{
 	{"APP_NAME", func(c *DeployConf) *string { return &c.AppName }},
-	{"ENV_PREFIX", func(c *DeployConf) *string { return &c.EnvPrefix }},
+	{"ENV_VAR_PREFIX", func(c *DeployConf) *string { return &c.EnvVarPrefix }},
 	{"DB_NAME", func(c *DeployConf) *string { return &c.DBName }},
 	{"HTTP_PORT", func(c *DeployConf) *string { return &c.HTTPPort }},
 	{"GIT_REPO", func(c *DeployConf) *string { return &c.GitRepo }},
@@ -148,7 +148,7 @@ var gitRepoPattern = regexp.MustCompile(`^[\w.-]+/[\w.-]+$`)
 func Validate(conf DeployConf) []string {
 	var errs []string
 	requireNonEmpty(&errs, "APP_NAME", conf.AppName)
-	requireNonEmpty(&errs, "ENV_PREFIX", conf.EnvPrefix)
+	requireNonEmpty(&errs, "ENV_VAR_PREFIX", conf.EnvVarPrefix)
 	requireNonEmpty(&errs, "DB_NAME", conf.DBName)
 	requireNonEmpty(&errs, "HTTP_PORT", conf.HTTPPort)
 	requireNonEmpty(&errs, "GIT_REPO", conf.GitRepo)

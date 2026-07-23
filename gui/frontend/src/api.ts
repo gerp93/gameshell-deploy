@@ -12,7 +12,7 @@ export interface Settings {
 
 export interface DeployConf {
   appName: string;
-  envPrefix: string;
+  envVarPrefix: string;
   dbName: string;
   httpPort: string;
   gitRepo: string;
