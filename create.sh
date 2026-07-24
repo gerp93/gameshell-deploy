@@ -3,16 +3,29 @@
 # Create a Digital Ocean instance of a gameshell-framework game.
 #
 # Usage:  ./create.sh APP_NAME [--ssh-key=NAME] [--tier=1|2|3] [--yes]
+#         ./create.sh APP_NAME --list-tiers
 #   APP_NAME is the game name (e.g., timeline-trivia, card-judge). Config and
 #   backups are read from games/APP_NAME/ relative to this script — deploy.conf
 #   (see deploy.conf.template) and a backups/ directory holding at least one
 #   GPG-encrypted database backup (*.sql.gpg).
 #
 #   --ssh-key=NAME  skip the SSH key prompt, use this key name
-#   --tier=1|2|3    skip the price tier prompt, use this tier
+#   --tier=1|2|3    skip the price tier prompt, use this tier. The number
+#                   always refers to the same tier (1=xs/2=s/3=m) regardless
+#                   of region availability — see --list-tiers below.
 #   --yes           auto-confirm the fork-sync push prompt
 #   These flags exist so GUI wrappers can drive this script non-interactively;
 #   omit any of them and the matching prompt below still runs as normal.
+#
+#   --list-tiers    print the tiers available in this game's configured
+#                   region (one per line: NUMBER\tSLUG\tAPP_SIZE\tLABEL) and
+#                   exit before touching secrets, backups, or the network
+#                   beyond the availability check itself. Doesn't deploy
+#                   anything — this is the same availability check the
+#                   interactive/--tier paths run below, exposed standalone so
+#                   a GUI can populate a tier dropdown without duplicating
+#                   this logic in another language. NUMBER is stable and is
+#                   exactly what --tier= above expects back.
 #
 # Operator secrets come from the environment (game-agnostic):
 #   DEPLOY_SQL_USER      database user to create on the droplet
@@ -29,75 +42,19 @@ set -e # exit on any command error
 OPS_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 ################################################################################
-# check for new commits on this checkout's remote (never pulls automatically)
-#
-# This is gameshell-deploy's own git history, not the game's — bug fixes and
-# behavior changes land here too, so a stale checkout can run with outdated
-# logic. Only warns and confirms; never fetches destructively or merges.
-
-echo "----------------------------------------"
-if ! git -C "$OPS_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-	echo "Not a git checkout, skipping remote check."
-elif ! git -C "$OPS_DIR" fetch --quiet 2>/dev/null; then
-	echo "Could not fetch origin (offline?), skipping remote check."
-elif ! git -C "$OPS_DIR" rev-parse --abbrev-ref --symbolic-full-name '@{u}' >/dev/null 2>&1; then
-	echo "No upstream tracking branch configured for origin, skipping remote check."
-else
-	BEHIND_COUNT=$(git -C "$OPS_DIR" rev-list --count 'HEAD..@{u}')
-	if [ "$BEHIND_COUNT" -gt 0 ]; then
-		echo "This gameshell-deploy checkout is $BEHIND_COUNT commit(s) behind its remote:"
-		git -C "$OPS_DIR" log --oneline 'HEAD..@{u}'
-		read -p "Continue anyway without updating? (y/N): " CONFIRM_STALE
-		if ! [[ "$CONFIRM_STALE" =~ ^[Yy]$ ]]; then
-			echo "Aborted. Run 'git pull' in $OPS_DIR to update, then try again."
-			exit 1
-		fi
-	else
-		echo "This gameshell-deploy checkout is up to date with its remote."
-	fi
-fi
-
-# If this gameshell-deploy checkout is itself a GitHub fork (has a
-# conventional "upstream" remote), check that too — same fetch-only,
-# never-pull, confirm pattern, just against the original repo instead of
-# the fork. Unrelated to the game's own GIT_REPO/GIT_UPSTREAM fork-sync
-# below — that's about the game being deployed, this is about this tool.
-if ! git -C "$OPS_DIR" remote get-url upstream >/dev/null 2>&1; then
-	echo "This gameshell-deploy checkout has no 'upstream' remote (not a fork), skipping upstream check."
-elif ! git -C "$OPS_DIR" fetch --quiet upstream 2>/dev/null; then
-	echo "Could not fetch this gameshell-deploy checkout's upstream (offline?), skipping upstream check."
-else
-	UPSTREAM_DEFAULT_BRANCH=$(git -C "$OPS_DIR" ls-remote --symref upstream HEAD | sed -n 's#^ref: refs/heads/\(.*\)\tHEAD$#\1#p')
-	if [ -z "$UPSTREAM_DEFAULT_BRANCH" ]; then
-		echo "Could not determine this gameshell-deploy checkout's upstream default branch, skipping upstream check."
-	else
-		UPSTREAM_BEHIND_COUNT=$(git -C "$OPS_DIR" rev-list --count "HEAD..upstream/$UPSTREAM_DEFAULT_BRANCH")
-		if [ "$UPSTREAM_BEHIND_COUNT" -gt 0 ]; then
-			echo "This gameshell-deploy checkout is $UPSTREAM_BEHIND_COUNT commit(s) behind its upstream/$UPSTREAM_DEFAULT_BRANCH:"
-			git -C "$OPS_DIR" log --oneline "HEAD..upstream/$UPSTREAM_DEFAULT_BRANCH"
-			read -p "Continue anyway without syncing? (y/N): " CONFIRM_UPSTREAM_STALE
-			if ! [[ "$CONFIRM_UPSTREAM_STALE" =~ ^[Yy]$ ]]; then
-				echo "Aborted. Sync this gameshell-deploy checkout with upstream/$UPSTREAM_DEFAULT_BRANCH, then try again."
-				exit 1
-			fi
-		else
-			echo "This gameshell-deploy checkout is up to date with its upstream/$UPSTREAM_DEFAULT_BRANCH."
-		fi
-	fi
-fi
-
-################################################################################
 # parse args
 
 SSH_KEY_NAME_FLAG=""
 PRICE_TIER_FLAG=""
 AUTO_YES=0
+LIST_TIERS=0
 APP_NAME_ARG=""
 for arg in "$@"; do
 	case "$arg" in
 		--ssh-key=*) SSH_KEY_NAME_FLAG="${arg#*=}" ;;
 		--tier=*) PRICE_TIER_FLAG="${arg#*=}" ;;
 		--yes) AUTO_YES=1 ;;
+		--list-tiers) LIST_TIERS=1 ;;
 		-*)
 			echo "Unknown option: $arg"
 			exit 1
@@ -105,8 +62,73 @@ for arg in "$@"; do
 		*) APP_NAME_ARG="$arg" ;;
 	esac
 done
-: "${APP_NAME_ARG:?Usage: ./create.sh APP_NAME [--ssh-key=NAME] [--tier=1|2|3] [--yes]}"
+: "${APP_NAME_ARG:?Usage: ./create.sh APP_NAME [--ssh-key=NAME] [--tier=1|2|3] [--yes] [--list-tiers]}"
 GAME_CONFIG_DIR="$OPS_DIR/games/$APP_NAME_ARG"
+
+################################################################################
+# check for new commits on this checkout's remote (never pulls automatically)
+#
+# This is gameshell-deploy's own git history, not the game's — bug fixes and
+# behavior changes land here too, so a stale checkout can run with outdated
+# logic. Only warns and confirms; never fetches destructively or merges.
+# Skipped for --list-tiers: a GUI may call that repeatedly (e.g. every time
+# the operator changes the configured region) and doesn't need a network
+# round-trip and a possible interactive prompt just to list tiers.
+
+if [ "$LIST_TIERS" -eq 1 ]; then
+	: # skip, see comment above
+else
+	echo "----------------------------------------"
+	if ! git -C "$OPS_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+		echo "Not a git checkout, skipping remote check."
+	elif ! git -C "$OPS_DIR" fetch --quiet 2>/dev/null; then
+		echo "Could not fetch origin (offline?), skipping remote check."
+	elif ! git -C "$OPS_DIR" rev-parse --abbrev-ref --symbolic-full-name '@{u}' >/dev/null 2>&1; then
+		echo "No upstream tracking branch configured for origin, skipping remote check."
+	else
+		BEHIND_COUNT=$(git -C "$OPS_DIR" rev-list --count 'HEAD..@{u}')
+		if [ "$BEHIND_COUNT" -gt 0 ]; then
+			echo "This gameshell-deploy checkout is $BEHIND_COUNT commit(s) behind its remote:"
+			git -C "$OPS_DIR" log --oneline 'HEAD..@{u}'
+			read -p "Continue anyway without updating? (y/N): " CONFIRM_STALE
+			if ! [[ "$CONFIRM_STALE" =~ ^[Yy]$ ]]; then
+				echo "Aborted. Run 'git pull' in $OPS_DIR to update, then try again."
+				exit 1
+			fi
+		else
+			echo "This gameshell-deploy checkout is up to date with its remote."
+		fi
+	fi
+
+	# If this gameshell-deploy checkout is itself a GitHub fork (has a
+	# conventional "upstream" remote), check that too — same fetch-only,
+	# never-pull, confirm pattern, just against the original repo instead of
+	# the fork. Unrelated to the game's own GIT_REPO/GIT_UPSTREAM fork-sync
+	# below — that's about the game being deployed, this is about this tool.
+	if ! git -C "$OPS_DIR" remote get-url upstream >/dev/null 2>&1; then
+		echo "This gameshell-deploy checkout has no 'upstream' remote (not a fork), skipping upstream check."
+	elif ! git -C "$OPS_DIR" fetch --quiet upstream 2>/dev/null; then
+		echo "Could not fetch this gameshell-deploy checkout's upstream (offline?), skipping upstream check."
+	else
+		UPSTREAM_DEFAULT_BRANCH=$(git -C "$OPS_DIR" ls-remote --symref upstream HEAD | sed -n 's#^ref: refs/heads/\(.*\)\tHEAD$#\1#p')
+		if [ -z "$UPSTREAM_DEFAULT_BRANCH" ]; then
+			echo "Could not determine this gameshell-deploy checkout's upstream default branch, skipping upstream check."
+		else
+			UPSTREAM_BEHIND_COUNT=$(git -C "$OPS_DIR" rev-list --count "HEAD..upstream/$UPSTREAM_DEFAULT_BRANCH")
+			if [ "$UPSTREAM_BEHIND_COUNT" -gt 0 ]; then
+				echo "This gameshell-deploy checkout is $UPSTREAM_BEHIND_COUNT commit(s) behind its upstream/$UPSTREAM_DEFAULT_BRANCH:"
+				git -C "$OPS_DIR" log --oneline "HEAD..upstream/$UPSTREAM_DEFAULT_BRANCH"
+				read -p "Continue anyway without syncing? (y/N): " CONFIRM_UPSTREAM_STALE
+				if ! [[ "$CONFIRM_UPSTREAM_STALE" =~ ^[Yy]$ ]]; then
+					echo "Aborted. Sync this gameshell-deploy checkout with upstream/$UPSTREAM_DEFAULT_BRANCH, then try again."
+					exit 1
+				fi
+			else
+				echo "This gameshell-deploy checkout is up to date with its upstream/$UPSTREAM_DEFAULT_BRANCH."
+			fi
+		fi
+	fi
+fi
 
 ################################################################################
 # load per-game config
@@ -128,6 +150,132 @@ source "$CONFIG_PATH"
 DROPLET_REGION="${DROPLET_REGION:-nyc3}"
 DROPLET_IMAGE="${DROPLET_IMAGE:-centos-stream-10-x64}"
 DROPLET_NAME="$APP_NAME-database"
+
+################################################################################
+# get price tier
+#
+# These AMD droplet sizes aren't sold in every DO region (notably not in
+# nyc3, the default DROPLET_REGION), so `doctl compute droplet create` can
+# fail with a 422 for a tier that looks fine here. The 3 arrays below are
+# parallel and index-aligned (TIER_SLUGS[i]/TIER_APP_SIZES[i]/TIER_LABELS[i]
+# all describe the same tier) — this is the one place tier definitions live;
+# everything downstream, including the 422 handling later, reads from here.
+#
+# This runs before the operator-secrets/backup/fork-sync sections below on
+# purpose: it's a pure read-only check against DROPLET_REGION (from
+# deploy.conf) and doesn't need DEPLOY_SQL_USER/PASSWORD or anything else,
+# so a bad region/tier combination (or a --list-tiers query) fails fast
+# without requiring secrets to be set first.
+
+if [ "$LIST_TIERS" -eq 0 ]; then
+	echo "----------------------------------------"
+fi
+
+TIER_SLUGS=("s-1vcpu-1gb-amd" "s-2vcpu-4gb-amd" "s-4vcpu-8gb-amd")
+TIER_APP_SIZES=("basic-xs" "basic-s" "basic-m")
+TIER_LABELS=("\$17/month, \$0.02518/hour" "\$48/month, \$0.07155/hour" "\$96/month, \$0.14273/hour")
+
+# AVAILABLE_TIERS holds indices into TIER_SLUGS/TIER_APP_SIZES/TIER_LABELS
+# (not the tiers themselves, and not 1-based tier numbers) — it's whatever
+# subset of 0/1/2 the region check below found available.
+if ! command -v jq >/dev/null 2>&1; then
+	if [ "$LIST_TIERS" -eq 0 ]; then
+		echo "*** No jq found, skipping tier availability pre-check ***"
+		echo "Install jq (e.g. 'brew install jq' on macOS, 'apt install jq' on Debian/Ubuntu) to run the tier availability pre-check against the configured region on future runs."
+	fi
+	AVAILABLE_TIERS=(0 1 2) # no check ran, so assume all 3 are valid like before
+else
+	# "slug region" pairs, one per line, covering all 3 tiers at once. This
+	# doesn't depend on DROPLET_REGION, so it's fetched once even if the loop
+	# below retries with a different region.
+	TIER_SLUGS_JSON=$(printf '%s\n' "${TIER_SLUGS[@]}" | jq -R . | jq -s .)
+	TIER_REGION_PAIRS=$(doctl compute size list -o json | jq -r --argjson slugs "$TIER_SLUGS_JSON" '
+		.[] | select(.slug as $s | $slugs | index($s)) | .slug as $s | .regions[] | "\($s) \(.)"
+	')
+	TIER_REGIONS=$(echo "$TIER_REGION_PAIRS" | awk '{print $2}' | sort -u)
+
+	check_available_tiers() {
+		AVAILABLE_TIERS=()
+		for i in 0 1 2; do
+			if echo "$TIER_REGION_PAIRS" | grep -qx "${TIER_SLUGS[$i]} $DROPLET_REGION"; then
+				AVAILABLE_TIERS+=("$i")
+			fi
+		done
+	}
+
+	if [ "$LIST_TIERS" -eq 1 ]; then
+		# Query mode: check once against the configured region and report
+		# whatever is found (possibly nothing) — no interactive region retry.
+		check_available_tiers
+	else
+		echo "Checking which price tiers are currently available in region $DROPLET_REGION..."
+		check_available_tiers
+		while [ ${#AVAILABLE_TIERS[@]} -eq 0 ]; do
+			echo "None of the pre-defined price tiers (${TIER_SLUGS[*]}) are available in the configured region ($DROPLET_REGION)"
+			echo "Set DROPLET_REGION in games/$APP_NAME_ARG/deploy.conf, or choose a different region below:"
+			echo "Other Regions where at least one of these tiers is currently available:"
+			doctl compute region list --format=Slug,Name --no-header | while read -r RSLUG RNAME; do
+				if echo "$TIER_REGIONS" | grep -qx "$RSLUG"; then
+					echo "  $RSLUG - $RNAME"
+				fi
+			done
+			read -p "Enter a different region code to check (or leave blank to abort): " NEW_DROPLET_REGION
+			if [[ -z "$NEW_DROPLET_REGION" ]]; then
+				echo "Update DROPLET_REGION in games/$APP_NAME_ARG/deploy.conf to one of the above and try again."
+				exit 1
+			fi
+			DROPLET_REGION="$NEW_DROPLET_REGION"
+			echo "Checking which price tiers are currently available in region $DROPLET_REGION..."
+			check_available_tiers
+		done
+	fi
+fi
+
+if [ "$LIST_TIERS" -eq 1 ]; then
+	for i in "${AVAILABLE_TIERS[@]}"; do
+		printf '%s\t%s\t%s\t%s\n' "$((i + 1))" "${TIER_SLUGS[$i]}" "${TIER_APP_SIZES[$i]}" "${TIER_LABELS[$i]}"
+	done
+	exit 0
+fi
+
+if [[ -n "$PRICE_TIER_FLAG" ]]; then
+	# --tier is always the stable 1-based tier number (matching TIER_SLUGS),
+	# never the position in the filtered menu below — that position shifts
+	# depending on region availability, so a fixed flag value can't target it
+	# reliably. --list-tiers reports the same stable numbering.
+	if ! [[ "$PRICE_TIER_FLAG" =~ ^[0-9]+$ ]] || [ "$PRICE_TIER_FLAG" -lt 1 ] || [ "$PRICE_TIER_FLAG" -gt 3 ]; then
+		echo "Invalid --tier value: $PRICE_TIER_FLAG (must be 1, 2, or 3)"
+		exit 1
+	fi
+	TIER_INDEX=$((PRICE_TIER_FLAG - 1))
+	if ! printf '%s\n' "${AVAILABLE_TIERS[@]}" | grep -qx "$TIER_INDEX"; then
+		echo "Tier $PRICE_TIER_FLAG (${TIER_SLUGS[$TIER_INDEX]}) is not available in region $DROPLET_REGION."
+		echo "Available tiers in this region:"
+		for i in "${AVAILABLE_TIERS[@]}"; do
+			echo "  $((i + 1))) ${TIER_LABELS[$i]}"
+		done
+		exit 1
+	fi
+	echo "Price tier: $PRICE_TIER_FLAG (${TIER_LABELS[$TIER_INDEX]}) (from --tier)"
+else
+	echo "Choose price tier to host:"
+	for n in "${!AVAILABLE_TIERS[@]}"; do
+		i="${AVAILABLE_TIERS[$n]}"
+		echo "$((n + 1))) ${TIER_LABELS[$i]}"
+	done
+	read -p "Choice: " PRICE_TIER_CHOICE
+
+	if ! [[ "$PRICE_TIER_CHOICE" =~ ^[0-9]+$ ]] || [ "$PRICE_TIER_CHOICE" -lt 1 ] || [ "$PRICE_TIER_CHOICE" -gt "${#AVAILABLE_TIERS[@]}" ]; then
+		echo "Invalid price tier choice"
+		exit 1
+	fi
+
+	# PRICE_TIER_CHOICE is the displayed 1..N menu position; map it back
+	# through AVAILABLE_TIERS to the real index into TIER_SLUGS/TIER_APP_SIZES.
+	TIER_INDEX="${AVAILABLE_TIERS[$((PRICE_TIER_CHOICE - 1))]}"
+fi
+DROPLET_SIZE="${TIER_SLUGS[$TIER_INDEX]}"
+APP_SIZE="${TIER_APP_SIZES[$TIER_INDEX]}"
 
 ################################################################################
 # check operator secrets
@@ -260,93 +408,6 @@ if [[ -z "$SSH_KEY_ID" ]]; then
 	echo "SSH Key ID not found"
 	exit 1
 fi
-
-################################################################################
-# get price tier
-#
-# These AMD droplet sizes aren't sold in every DO region (notably not in
-# nyc3, the default DROPLET_REGION), so `doctl compute droplet create` can
-# fail with a 422 for a tier that looks fine here. The 3 arrays below are
-# parallel and index-aligned (TIER_SLUGS[i]/TIER_APP_SIZES[i]/TIER_LABELS[i]
-# all describe the same tier) — this is the one place tier definitions live;
-# everything downstream, including the 422 handling later, reads from here.
-
-echo "----------------------------------------"
-
-TIER_SLUGS=("s-1vcpu-1gb-amd" "s-2vcpu-4gb-amd" "s-4vcpu-8gb-amd")
-TIER_APP_SIZES=("basic-xs" "basic-s" "basic-m")
-TIER_LABELS=("\$17/month, \$0.02518/hour" "\$48/month, \$0.07155/hour" "\$96/month, \$0.14273/hour")
-
-# AVAILABLE_TIERS holds indices into TIER_SLUGS/TIER_APP_SIZES/TIER_LABELS
-# (not the tiers themselves), so the menu below can renumber 1..N over
-# however many tiers survive the check, however many that turns out to be.
-if ! command -v jq >/dev/null 2>&1; then
-	echo "*** No jq found, skipping tier availability pre-check ***"
-	echo "Install jq (e.g. 'brew install jq' on macOS, 'apt install jq' on Debian/Ubuntu) to run the tier availability pre-check against the configured region on future runs."
-	AVAILABLE_TIERS=(0 1 2) # no check ran, so assume all 3 are valid like before
-else
-	# "slug region" pairs, one per line, covering all 3 tiers at once. This
-	# doesn't depend on DROPLET_REGION, so it's fetched once even if the loop
-	# below retries with a different region.
-	TIER_SLUGS_JSON=$(printf '%s\n' "${TIER_SLUGS[@]}" | jq -R . | jq -s .)
-	TIER_REGION_PAIRS=$(doctl compute size list -o json | jq -r --argjson slugs "$TIER_SLUGS_JSON" '
-		.[] | select(.slug as $s | $slugs | index($s)) | .slug as $s | .regions[] | "\($s) \(.)"
-	')
-	TIER_REGIONS=$(echo "$TIER_REGION_PAIRS" | awk '{print $2}' | sort -u)
-
-	echo "Checking which price tiers are currently available in region $DROPLET_REGION..."
-	while true; do
-		AVAILABLE_TIERS=()
-		for i in 0 1 2; do
-			if echo "$TIER_REGION_PAIRS" | grep -qx "${TIER_SLUGS[$i]} $DROPLET_REGION"; then
-				AVAILABLE_TIERS+=("$i")
-			fi
-		done
-
-		if [ ${#AVAILABLE_TIERS[@]} -gt 0 ]; then
-			break
-		fi
-
-		echo "None of the pre-defined price tiers (${TIER_SLUGS[*]}) are available in the configured region ($DROPLET_REGION)"
-		echo "Set DROPLET_REGION in games/$APP_NAME_ARG/deploy.conf, or choose a different region below:"
-		echo "Other Regions where at least one of these tiers is currently available:"
-		doctl compute region list --format=Slug,Name --no-header | while read -r RSLUG RNAME; do
-			if echo "$TIER_REGIONS" | grep -qx "$RSLUG"; then
-				echo "  $RSLUG - $RNAME"
-			fi
-		done
-		read -p "Enter a different region code to check (or leave blank to abort): " NEW_DROPLET_REGION
-		if [[ -z "$NEW_DROPLET_REGION" ]]; then
-			echo "Update DROPLET_REGION in games/$APP_NAME_ARG/deploy.conf to one of the above and try again."
-			exit 1
-		fi
-		DROPLET_REGION="$NEW_DROPLET_REGION"
-		echo "Checking which price tiers are currently available in region $DROPLET_REGION..."
-	done
-fi
-
-echo "Choose price tier to host:"
-for n in "${!AVAILABLE_TIERS[@]}"; do
-	i="${AVAILABLE_TIERS[$n]}"
-	echo "$((n + 1))) ${TIER_LABELS[$i]}"
-done
-if [[ -n "$PRICE_TIER_FLAG" ]]; then
-	PRICE_TIER_CHOICE="$PRICE_TIER_FLAG"
-	echo "Choice: $PRICE_TIER_CHOICE (from --tier)"
-else
-	read -p "Choice: " PRICE_TIER_CHOICE
-fi
-
-if ! [[ "$PRICE_TIER_CHOICE" =~ ^[0-9]+$ ]] || [ "$PRICE_TIER_CHOICE" -lt 1 ] || [ "$PRICE_TIER_CHOICE" -gt "${#AVAILABLE_TIERS[@]}" ]; then
-	echo "Invalid price tier choice"
-	exit 1
-fi
-
-# PRICE_TIER_CHOICE is the displayed 1..N menu position; map it back through
-# AVAILABLE_TIERS to the real index into TIER_SLUGS/TIER_APP_SIZES.
-TIER_INDEX="${AVAILABLE_TIERS[$((PRICE_TIER_CHOICE - 1))]}"
-DROPLET_SIZE="${TIER_SLUGS[$TIER_INDEX]}"
-APP_SIZE="${TIER_APP_SIZES[$TIER_INDEX]}"
 
 ################################################################################
 # create droplet
