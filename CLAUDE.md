@@ -12,7 +12,16 @@ games (currently [card-judge](https://github.com/gerp93/card-judge) and
 **control plane and artifact store**: you run its scripts from a checkout of
 this repo, passing an app name (`./create.sh APP_NAME`); config and backups
 for every game live in this repo too, under `games/APP_NAME/`. There is no
-Go/JS/etc. code here — just bash scripts, a couple of templates, and docs.
+Go/JS/etc. code here besides `gui/` (see below) — just bash scripts, a
+couple of templates, and docs.
+
+**Exception:** `gui/` contains a self-contained Wails (Go) desktop app that wraps
+`create.sh`/`delete.sh` for operators who prefer a GUI to the CLI — it is the one
+place in this repo with non-bash code, has its own `go.mod`, and follows normal
+Go/Wails conventions rather than the bash conventions below. It only adds
+non-interactive flags to `create.sh`/`delete.sh` (see their headers); it never
+hardcodes game-specific values, and it drives the scripts the same way the CLI
+does — by app name, reading/writing `games/APP_NAME/deploy.conf`.
 
 Target platform: **Digital Ocean** (`doctl` for both a MariaDB droplet and a
 DO App Platform app), driven from a **Linux/macOS shell** (`bash`). GPG
