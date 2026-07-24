@@ -5,6 +5,11 @@ import type { DeployConf, LogLine, PreflightResult, StatusResult } from "./api";
 export const state = {
   opsDir: "",
   appName: "",
+  // The games/ directory listing — shared so any panel that changes it on
+  // disk (creating a new deploy.conf, deleting a game) can trigger a
+  // refetch via appPanel's exported refreshGames() without reaching into
+  // the sidebar component directly.
+  games: [] as string[],
   deployConfFound: false,
   deployConf: null as DeployConf | null,
   preflight: null as PreflightResult | null,

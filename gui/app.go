@@ -151,6 +151,27 @@ func (a *App) OpenBackupsFolder(opsDir, appName string) error {
 	return platform.OpenFolder(dir)
 }
 
+// DeleteGame permanently removes games/appName — its deploy.conf and any
+// locally stored backups — from disk. Refuses while Digital Ocean still
+// reports a live droplet/app for it: deleting the local config first would
+// destroy the only record of what still needs tearing down on DO.
+func (a *App) DeleteGame(opsDir, appName string) error {
+	confResult, err := a.LoadDeployConf(opsDir, appName)
+	if err != nil {
+		return err
+	}
+	if confResult.Found {
+		status, err := scriptrunner.CheckStatus(confResult.Conf.AppName)
+		if err != nil {
+			return fmt.Errorf("could not verify Digital Ocean status before deleting: %w", err)
+		}
+		if status.DropletExists || status.AppExists {
+			return fmt.Errorf("%s still has a droplet/app on Digital Ocean — tear it down first", appName)
+		}
+	}
+	return os.RemoveAll(gameConfigDir(opsDir, appName))
+}
+
 // --- deploy.conf editor ---------------------------------------------------
 
 // DeployConfResult wraps DeployConf with a Found flag so the frontend can

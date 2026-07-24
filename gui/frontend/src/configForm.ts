@@ -1,4 +1,5 @@
 import { createDeployConf, saveDeployConf, type DeployConf } from "./api";
+import { refreshGames } from "./appPanel";
 import { state, notify } from "./state";
 
 const emptyConf: DeployConf = {
@@ -81,6 +82,9 @@ export function createConfigForm(): { el: HTMLElement; render: () => void } {
       } else {
         await createDeployConf(state.opsDir, state.appName, conf);
         state.deployConfFound = true;
+        // The games/appName directory (and this game's entry in the
+        // sidebar) didn't exist until createDeployConf just made it.
+        await refreshGames();
       }
       state.deployConf = conf;
       message.textContent = "Saved.";
@@ -90,10 +94,29 @@ export function createConfigForm(): { el: HTMLElement; render: () => void } {
     }
   };
 
+  // Tracks which game the form fields currently reflect, so switching games
+  // repopulates them (or clears them, for a brand new game) exactly once —
+  // re-running fillForm() on every render would also wipe out whatever the
+  // operator is mid-typing in an unsaved form. Gated on !state.loadingGame
+  // too: chooseApp() sets state.appName and notifies immediately, before
+  // its async loadDeployConf() call resolves, so a naive appName-only guard
+  // fills the form from a still-null state.deployConf and then never
+  // refills once the real one arrives (formForApp already "matches" by
+  // then).
+  let formForApp: string | null = null;
+
   function render() {
     el.dataset.disabled = state.appName ? "false" : "true";
     saveButton.textContent = state.deployConfFound ? "Save deploy.conf" : "Create deploy.conf";
-    if (state.deployConf) fillForm(state.deployConf);
+    if (!state.loadingGame && state.appName !== formForApp) {
+      formForApp = state.appName;
+      // A brand new, not-yet-saved game starts blank rather than showing
+      // whichever game's config happened to be loaded before it — only
+      // APP_NAME is pre-filled, from the games/ directory name being
+      // created, since leftover values here (especially GIT_REPO) would be
+      // easy to save by mistake without noticing they're stale.
+      fillForm(state.deployConf ?? { ...emptyConf, appName: state.appName });
+    }
   }
 
   render();
