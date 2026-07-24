@@ -1,6 +1,6 @@
 import { runDelete } from "./api";
 import { createLogPane } from "./logPane";
-import { refreshStatus } from "./appPanel";
+import { refreshStatus, scheduleStatusReconcile } from "./appPanel";
 import { state, preflightPassed, isDeployed, isGameRunning, getGameRun, notify } from "./state";
 import { createRunSummary } from "./runSummary";
 
@@ -73,6 +73,7 @@ export function createTeardownPanel(): { el: HTMLElement; render: () => void } {
       }
       render();
       notify();
+      scheduleStatusReconcile(info.appName);
     })();
   });
 

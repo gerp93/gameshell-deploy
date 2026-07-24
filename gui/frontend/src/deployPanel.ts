@@ -9,7 +9,7 @@ import {
   type TierOption,
 } from "./api";
 import { createLogPane } from "./logPane";
-import { refreshStatus } from "./appPanel";
+import { refreshStatus, scheduleStatusReconcile } from "./appPanel";
 import { state, preflightPassed, isDeployed, isGameRunning, getGameRun, notify } from "./state";
 import { createRunSummary } from "./runSummary";
 
@@ -143,6 +143,9 @@ export function createDeployPanel(): { el: HTMLElement; render: () => void } {
       }
       void render();
       notify();
+      // Also picks up the app's ingress URL if DO hadn't assigned one yet
+      // when the status above was read.
+      scheduleStatusReconcile(info.appName);
     })();
   });
 
@@ -242,6 +245,20 @@ export function createDeployPanel(): { el: HTMLElement; render: () => void } {
     }
 
     regionSelect.innerHTML = "";
+
+    // The configured region is always the selected one, even when it offers
+    // nothing — silently deploying somewhere the operator didn't choose is
+    // a real change (latency, cost, data residency), and pairing that with
+    // a populated tier list reads as "the configured region has tiers". It
+    // gets listed as an explicitly unavailable option instead, so the empty
+    // tier list below is clearly about the region on screen.
+    const configuredIsAvailable = regions.some((r) => r.slug === configured);
+    if (!configuredIsAvailable) {
+      const opt = document.createElement("option");
+      opt.value = configured;
+      opt.textContent = `${configured} — no matching tiers`;
+      regionSelect.appendChild(opt);
+    }
     for (const region of regions) {
       const opt = document.createElement("option");
       opt.value = region.slug;
@@ -249,16 +266,11 @@ export function createDeployPanel(): { el: HTMLElement; render: () => void } {
       regionSelect.appendChild(opt);
     }
 
-    // The configured region often isn't in the list — that's the whole
-    // reason this dropdown exists (nyc3 sells none of these sizes) — so
-    // fall back to the first region that does work rather than showing a
-    // selection that can't deploy.
-    if (regions.some((r) => r.slug === configured)) {
-      regionSelect.value = configured;
+    regionSelect.value = configured;
+    if (configuredIsAvailable) {
       regionStatus.textContent = "";
     } else if (regions.length > 0) {
-      regionSelect.value = regions[0].slug;
-      regionStatus.textContent = `deploy.conf's region (${configured}) offers none of these tiers — using ${regionSelect.value} for this deploy. Set DROPLET_REGION in the Config tab to make it permanent.`;
+      regionStatus.textContent = `deploy.conf's region (${configured}) doesn't offer any of these droplet sizes. Pick another region above to deploy there this time, or set DROPLET_REGION in the Config tab to change it permanently.`;
     } else {
       clearTiers();
       tierStatus.textContent = "";

@@ -44,15 +44,19 @@ export function createTabs(
     let active = getActive();
     const isVisible = (tab: TabDef) => tab.visible?.() ?? true;
 
-    // If the active tab just became hidden (e.g. deploy.conf was cleared),
-    // fall back to the first still-visible tab rather than showing nothing.
+    // If the active tab just became hidden (e.g. deploy.conf hasn't loaded
+    // yet), fall back to the first still-visible tab rather than showing
+    // nothing. Deliberately does NOT persist the fallback via setActive:
+    // selecting a game briefly has deployConfFound false while its config
+    // loads, which hides the Deploy/Teardown tab — persisting the fallback
+    // there would leave Config selected for every game the operator opens,
+    // even though nothing was actually chosen. Rendering the fallback
+    // without recording it means the preferred tab snaps back as soon as
+    // it's available again.
     const activeTab = tabs.find((t) => t.id === active);
     if (activeTab && !isVisible(activeTab)) {
       const fallback = tabs.find(isVisible);
-      if (fallback) {
-        active = fallback.id;
-        setActive(active);
-      }
+      if (fallback) active = fallback.id;
     }
 
     for (const tab of tabs) {

@@ -12,6 +12,29 @@ export async function refreshStatus(): Promise<void> {
   state.status = await checkStatus(state.deployConf.appName);
 }
 
+// Re-checks status a few seconds after a run finishes. Both panels write an
+// optimistic status the moment their script exits (deploy → deployed,
+// teardown → not deployed) because DO's list endpoints lag several seconds
+// behind reality. That write is a prediction, though, and if anything about
+// it is wrong the UI stays wrong until the operator reselects the game —
+// which is how a finished teardown can sit there still offering Teardown.
+// This reconciles against the real API once the lag has passed.
+export function scheduleStatusReconcile(appName: string, delayMs = 6000): void {
+  setTimeout(() => {
+    void (async () => {
+      // Skip if the operator moved on, or a new run started — that run now
+      // owns this game's status and will reconcile when it finishes.
+      if (state.appName !== appName || runningKind(appName)) return;
+      try {
+        await refreshStatus();
+      } catch {
+        return; // a failed re-check shouldn't clobber the optimistic value
+      }
+      notify();
+    })();
+  }, delayMs);
+}
+
 // Re-lists games/ and updates state.games — exported so configForm (after
 // creating a brand new game's deploy.conf) and gameHeader (after deleting
 // one) can refresh the sidebar without reaching into its closure directly.
