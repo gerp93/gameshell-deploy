@@ -95,3 +95,10 @@ func wslAvailable() bool {
 func openFolder(path string) error {
 	return exec.Command("explorer.exe", path).Start()
 }
+
+// openURL hands the URL to explorer.exe, which routes it to the default
+// browser. Passed as its own argv entry rather than through `cmd /c start`,
+// which would re-parse it as a shell string.
+func openURL(rawURL string) error {
+	return exec.Command("explorer.exe", rawURL).Start()
+}

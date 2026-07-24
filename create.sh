@@ -2,8 +2,9 @@
 ################################################################################
 # Create a Digital Ocean instance of a gameshell-framework game.
 #
-# Usage:  ./create.sh APP_NAME [--ssh-key=NAME] [--tier=1|2|3] [--yes]
-#         ./create.sh APP_NAME --list-tiers
+# Usage:  ./create.sh APP_NAME [--ssh-key=NAME] [--tier=1|2|3] [--region=SLUG] [--yes]
+#         ./create.sh APP_NAME --list-tiers [--region=SLUG]
+#         ./create.sh APP_NAME --list-regions
 #   APP_NAME is the game name (e.g., timeline-trivia, card-judge). Config and
 #   backups are read from games/APP_NAME/ relative to this script — deploy.conf
 #   (see deploy.conf.template) and a backups/ directory holding at least one
@@ -13,6 +14,10 @@
 #   --tier=1|2|3    skip the price tier prompt, use this tier. The number
 #                   always refers to the same tier (1=xs/2=s/3=m) regardless
 #                   of region availability — see --list-tiers below.
+#   --region=SLUG   deploy to this region instead of deploy.conf's
+#                   DROPLET_REGION, without editing the tracked config. Also
+#                   applies to --list-tiers, so a caller can check tiers for
+#                   a region before committing to it.
 #   --yes           auto-confirm the fork-sync push prompt
 #   These flags exist so GUI wrappers can drive this script non-interactively;
 #   omit any of them and the matching prompt below still runs as normal.
@@ -26,6 +31,11 @@
 #                   a GUI can populate a tier dropdown without duplicating
 #                   this logic in another language. NUMBER is stable and is
 #                   exactly what --tier= above expects back.
+#   --list-regions  print the regions offering at least one of these tiers
+#                   (one per line: SLUG\tNAME) and exit, same query-only
+#                   contract as --list-tiers. This is the same list the
+#                   interactive retry prompt below offers when the configured
+#                   region has no tiers available.
 #
 # Operator secrets come from the environment (game-agnostic):
 #   DEPLOY_SQL_USER      database user to create on the droplet
@@ -46,15 +56,19 @@ OPS_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 SSH_KEY_NAME_FLAG=""
 PRICE_TIER_FLAG=""
+REGION_FLAG=""
 AUTO_YES=0
 LIST_TIERS=0
+LIST_REGIONS=0
 APP_NAME_ARG=""
 for arg in "$@"; do
 	case "$arg" in
 		--ssh-key=*) SSH_KEY_NAME_FLAG="${arg#*=}" ;;
 		--tier=*) PRICE_TIER_FLAG="${arg#*=}" ;;
+		--region=*) REGION_FLAG="${arg#*=}" ;;
 		--yes) AUTO_YES=1 ;;
 		--list-tiers) LIST_TIERS=1 ;;
+		--list-regions) LIST_REGIONS=1 ;;
 		-*)
 			echo "Unknown option: $arg"
 			exit 1
@@ -62,8 +76,16 @@ for arg in "$@"; do
 		*) APP_NAME_ARG="$arg" ;;
 	esac
 done
-: "${APP_NAME_ARG:?Usage: ./create.sh APP_NAME [--ssh-key=NAME] [--tier=1|2|3] [--yes] [--list-tiers]}"
+: "${APP_NAME_ARG:?Usage: ./create.sh APP_NAME [--ssh-key=NAME] [--tier=1|2|3] [--region=SLUG] [--yes] [--list-tiers] [--list-regions]}"
 GAME_CONFIG_DIR="$OPS_DIR/games/$APP_NAME_ARG"
+
+# Both --list-* flags are query-only: they print and exit without deploying,
+# so everything below that exists to protect a real deploy (the staleness
+# checks, secret validation) is skipped for them.
+QUERY_ONLY=0
+if [ "$LIST_TIERS" -eq 1 ] || [ "$LIST_REGIONS" -eq 1 ]; then
+	QUERY_ONLY=1
+fi
 
 ################################################################################
 # check for new commits on this checkout's remote (never pulls automatically)
@@ -71,11 +93,11 @@ GAME_CONFIG_DIR="$OPS_DIR/games/$APP_NAME_ARG"
 # This is gameshell-deploy's own git history, not the game's — bug fixes and
 # behavior changes land here too, so a stale checkout can run with outdated
 # logic. Only warns and confirms; never fetches destructively or merges.
-# Skipped for --list-tiers: a GUI may call that repeatedly (e.g. every time
-# the operator changes the configured region) and doesn't need a network
-# round-trip and a possible interactive prompt just to list tiers.
+# Skipped for the --list-* query modes: a GUI may call those repeatedly (e.g.
+# every time the operator changes the region) and they don't need a network
+# round-trip and a possible interactive prompt just to answer a question.
 
-if [ "$LIST_TIERS" -eq 1 ]; then
+if [ "$QUERY_ONLY" -eq 1 ]; then
 	: # skip, see comment above
 else
 	echo "----------------------------------------"
@@ -148,6 +170,12 @@ source "$CONFIG_PATH"
 : "${GIT_REPO:?deploy.conf must set GIT_REPO}"
 
 DROPLET_REGION="${DROPLET_REGION:-nyc3}"
+# --region overrides deploy.conf for this run only — the tracked config is
+# never rewritten, so a one-off deploy elsewhere doesn't silently become the
+# game's new permanent region.
+if [[ -n "$REGION_FLAG" ]]; then
+	DROPLET_REGION="$REGION_FLAG"
+fi
 DROPLET_IMAGE="${DROPLET_IMAGE:-centos-stream-10-x64}"
 DROPLET_NAME="$APP_NAME-database"
 
@@ -167,7 +195,7 @@ DROPLET_NAME="$APP_NAME-database"
 # so a bad region/tier combination (or a --list-tiers query) fails fast
 # without requiring secrets to be set first.
 
-if [ "$LIST_TIERS" -eq 0 ]; then
+if [ "$QUERY_ONLY" -eq 0 ]; then
 	echo "----------------------------------------"
 fi
 
@@ -175,11 +203,24 @@ TIER_SLUGS=("s-1vcpu-1gb-amd" "s-2vcpu-4gb-amd" "s-4vcpu-8gb-amd")
 TIER_APP_SIZES=("basic-xs" "basic-s" "basic-m")
 TIER_LABELS=("\$17/month, \$0.02518/hour" "\$48/month, \$0.07155/hour" "\$96/month, \$0.14273/hour")
 
+# Prints "SLUG\tNAME" for every region offering at least one of the tiers
+# above. TIER_REGIONS is empty when the jq pre-check didn't run, in which
+# case every region is listed unfiltered — same "assume it's fine, let the
+# API be the judge" fallback the tier list itself uses without jq.
+print_available_regions() {
+	doctl compute region list --format=Slug,Name --no-header | while read -r RSLUG RNAME; do
+		if [ -z "$TIER_REGIONS" ] || echo "$TIER_REGIONS" | grep -qx "$RSLUG"; then
+			printf '%s\t%s\n' "$RSLUG" "$RNAME"
+		fi
+	done
+}
+
 # AVAILABLE_TIERS holds indices into TIER_SLUGS/TIER_APP_SIZES/TIER_LABELS
 # (not the tiers themselves, and not 1-based tier numbers) — it's whatever
 # subset of 0/1/2 the region check below found available.
+TIER_REGIONS=""
 if ! command -v jq >/dev/null 2>&1; then
-	if [ "$LIST_TIERS" -eq 0 ]; then
+	if [ "$QUERY_ONLY" -eq 0 ]; then
 		echo "*** No jq found, skipping tier availability pre-check ***"
 		echo "Install jq (e.g. 'brew install jq' on macOS, 'apt install jq' on Debian/Ubuntu) to run the tier availability pre-check against the configured region on future runs."
 	fi
@@ -203,7 +244,7 @@ else
 		done
 	}
 
-	if [ "$LIST_TIERS" -eq 1 ]; then
+	if [ "$QUERY_ONLY" -eq 1 ]; then
 		# Query mode: check once against the configured region and report
 		# whatever is found (possibly nothing) — no interactive region retry.
 		check_available_tiers
@@ -214,10 +255,8 @@ else
 			echo "None of the pre-defined price tiers (${TIER_SLUGS[*]}) are available in the configured region ($DROPLET_REGION)"
 			echo "Set DROPLET_REGION in games/$APP_NAME_ARG/deploy.conf, or choose a different region below:"
 			echo "Other Regions where at least one of these tiers is currently available:"
-			doctl compute region list --format=Slug,Name --no-header | while read -r RSLUG RNAME; do
-				if echo "$TIER_REGIONS" | grep -qx "$RSLUG"; then
-					echo "  $RSLUG - $RNAME"
-				fi
+			print_available_regions | while IFS=$'\t' read -r RSLUG RNAME; do
+				echo "  $RSLUG - $RNAME"
 			done
 			read -p "Enter a different region code to check (or leave blank to abort): " NEW_DROPLET_REGION
 			if [[ -z "$NEW_DROPLET_REGION" ]]; then
@@ -229,6 +268,11 @@ else
 			check_available_tiers
 		done
 	fi
+fi
+
+if [ "$LIST_REGIONS" -eq 1 ]; then
+	print_available_regions
+	exit 0
 fi
 
 if [ "$LIST_TIERS" -eq 1 ]; then

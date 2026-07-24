@@ -1,4 +1,4 @@
-import { deleteGame } from "./api";
+import { deleteGame, openURL } from "./api";
 import { refreshGames } from "./appPanel";
 import { state, notify } from "./state";
 
@@ -25,7 +25,24 @@ export function createGameHeader(): { el: HTMLElement; render: () => void } {
   deleteButton.textContent = "Delete game";
   deleteButton.onclick = () => showConfirm();
 
-  titleRow.append(title, pill, deleteButton);
+  // Shown only once a deploy has an ingress URL assigned. Opened via the Go
+  // side rather than an <a href> — this is a webview, so a plain link would
+  // navigate the app's own window instead of the operator's browser.
+  const openAppButton = document.createElement("button");
+  openAppButton.type = "button";
+  openAppButton.className = "secondary";
+  openAppButton.textContent = "Open app ↗";
+  openAppButton.onclick = () => {
+    const url = state.status?.appURL;
+    if (url) void openURL(url);
+  };
+
+  titleRow.append(title, pill, openAppButton, deleteButton);
+
+  // The URL itself, shown as text so it's readable/copyable rather than
+  // hidden behind the button alone.
+  const appURLLine = document.createElement("div");
+  appURLLine.className = "hint";
 
   // Confirmation is inline rather than a native confirm() popup, so the
   // warning text (backups included, unrecoverable) is always visible
@@ -85,7 +102,7 @@ export function createGameHeader(): { el: HTMLElement; render: () => void } {
     }
   };
 
-  el.append(hint, titleRow, confirmBox);
+  el.append(hint, titleRow, appURLLine, confirmBox);
 
   function render() {
     if (confirmForApp !== null && confirmForApp !== state.appName) hideConfirm();
@@ -98,6 +115,10 @@ export function createGameHeader(): { el: HTMLElement; render: () => void } {
     const deployed = state.status ? state.status.dropletExists || state.status.appExists : null;
     pill.className = deployed === null ? "" : deployed ? "pill pill-deployed" : "pill pill-not-deployed";
     pill.textContent = deployed === null ? "" : deployed ? "Deployed" : "Not deployed";
+
+    const appURL = state.status?.appURL ?? "";
+    openAppButton.style.display = appURL ? "" : "none";
+    appURLLine.textContent = appURL;
   }
 
   render();

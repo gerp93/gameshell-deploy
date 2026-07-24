@@ -1,4 +1,13 @@
-import { hasBackups, listAvailableTiers, listSSHKeys, openBackupsFolder, runCreate, type TierOption } from "./api";
+import {
+  hasBackups,
+  listAvailableRegions,
+  listAvailableTiers,
+  listSSHKeys,
+  openBackupsFolder,
+  runCreate,
+  type RegionOption,
+  type TierOption,
+} from "./api";
 import { createLogPane } from "./logPane";
 import { refreshStatus } from "./appPanel";
 import { state, preflightPassed, isDeployed, isGameRunning, getGameRun, notify } from "./state";
@@ -22,6 +31,24 @@ export function createDeployPanel(): { el: HTMLElement; render: () => void } {
   sshKeyRow.append(sshKeySelect, refreshKeysButton);
   sshKeyWrap.append(sshKeyLabel, sshKeyRow);
 
+  // Region override: defaults to deploy.conf's DROPLET_REGION, but since
+  // the tier sizes aren't sold everywhere (and the nyc3 default sells none
+  // of them), the operator needs to be able to pick another region without
+  // leaving the Deploy tab. Passed to create.sh as --region, which never
+  // rewrites deploy.conf — the Config tab is still where it's made permanent.
+  const regionWrap = document.createElement("div");
+  regionWrap.className = "field";
+  const regionLabel = document.createElement("label");
+  regionLabel.textContent = "Region";
+  const regionRow = document.createElement("div");
+  regionRow.className = "row";
+  const regionSelect = document.createElement("select");
+  regionSelect.onchange = () => void refreshTiers();
+  regionRow.append(regionSelect);
+  const regionStatus = document.createElement("div");
+  regionStatus.className = "hint";
+  regionWrap.append(regionLabel, regionRow, regionStatus);
+
   const tierWrap = document.createElement("div");
   tierWrap.className = "field";
   const tierLabel = document.createElement("label");
@@ -32,7 +59,7 @@ export function createDeployPanel(): { el: HTMLElement; render: () => void } {
   refreshTiersButton.type = "button";
   refreshTiersButton.className = "secondary";
   refreshTiersButton.textContent = "Refresh";
-  refreshTiersButton.onclick = () => void refreshTiers();
+  refreshTiersButton.onclick = () => void refreshRegions().then(refreshTiers);
   tierLabelRow.append(tierLabel, refreshTiersButton);
   const tierWrapper = document.createElement("div");
   const tierStatus = document.createElement("div");
@@ -103,7 +130,12 @@ export function createDeployPanel(): { el: HTMLElement; render: () => void } {
       // state for a few seconds (DO API eventual consistency). Only a
       // failure (partial/unknown state) needs a real re-check.
       if (info.code === 0) {
-        state.status = { dropletExists: true, appExists: true };
+        // Re-query to pick up the new app's ingress URL, but keep the
+        // deployed flags forced on: doctl can still report the old state for
+        // a few seconds (DO API eventual consistency), and we already know
+        // create.sh just finished successfully.
+        await refreshStatus();
+        state.status = { dropletExists: true, appExists: true, appURL: state.status?.appURL ?? "" };
       } else {
         await refreshStatus();
       }
@@ -138,6 +170,7 @@ export function createDeployPanel(): { el: HTMLElement; render: () => void } {
       appName,
       sshKeyName,
       tier,
+      region: regionSelect.value,
       autoYes: true,
       sqlUser,
       sqlPassword,
@@ -153,7 +186,7 @@ export function createDeployPanel(): { el: HTMLElement; render: () => void } {
   actionRow.className = "row";
   actionRow.append(openBackupsButton, deployButton);
 
-  el.append(sshKeyWrap, tierWrap, credsGrid, backupWarning, actionRow, logPane.el);
+  el.append(sshKeyWrap, regionWrap, tierWrap, credsGrid, backupWarning, actionRow, logPane.el);
 
   async function refreshKeys() {
     sshKeySelect.innerHTML = "";
@@ -166,11 +199,49 @@ export function createDeployPanel(): { el: HTMLElement; render: () => void } {
     }
   }
 
+  // Populates regionSelect with the regions create.sh reports as offering
+  // at least one tier, preselecting deploy.conf's DROPLET_REGION (or the
+  // nyc3 default) when it's among them.
+  async function refreshRegions() {
+    if (!state.opsDir || !state.appName) return;
+    const configured = state.deployConf?.dropletRegion?.trim() || "nyc3";
+    regionStatus.textContent = "Loading regions…";
+
+    let regions: RegionOption[] = [];
+    try {
+      regions = (await listAvailableRegions(state.opsDir, state.appName)) ?? [];
+    } catch (err) {
+      regionStatus.textContent = `Could not load regions: ${err instanceof Error ? err.message : String(err)}`;
+      return;
+    }
+
+    regionSelect.innerHTML = "";
+    for (const region of regions) {
+      const opt = document.createElement("option");
+      opt.value = region.slug;
+      opt.textContent = `${region.slug} — ${region.name}`;
+      regionSelect.appendChild(opt);
+    }
+
+    // The configured region often isn't in the list — that's the whole
+    // reason this dropdown exists (nyc3 sells none of these sizes) — so
+    // fall back to the first region that does work rather than showing a
+    // selection that can't deploy.
+    if (regions.some((r) => r.slug === configured)) {
+      regionSelect.value = configured;
+      regionStatus.textContent = "";
+    } else if (regions.length > 0) {
+      regionSelect.value = regions[0].slug;
+      regionStatus.textContent = `deploy.conf's region (${configured}) offers none of these tiers — using ${regionSelect.value} for this deploy. Set DROPLET_REGION in the Config tab to make it permanent.`;
+    } else {
+      regionStatus.textContent = "No regions offering these tiers were found.";
+    }
+  }
+
   // Populates tierWrapper with a radio button per tier create.sh's
-  // --list-tiers reports as available in this game's configured region.
-  // Preserves the previously-checked tier across a refresh when it's still
-  // on offer, so re-checking availability doesn't silently clear the
-  // operator's choice.
+  // --list-tiers reports as available in the selected region. Preserves the
+  // previously-checked tier across a refresh when it's still on offer, so
+  // re-checking availability doesn't silently clear the operator's choice.
   async function refreshTiers() {
     if (!state.opsDir || !state.appName) return;
     tiersLoadedForApp = state.appName;
@@ -180,7 +251,7 @@ export function createDeployPanel(): { el: HTMLElement; render: () => void } {
 
     let tiers: TierOption[] = [];
     try {
-      tiers = (await listAvailableTiers(state.opsDir, state.appName)) ?? [];
+      tiers = (await listAvailableTiers(state.opsDir, state.appName, regionSelect.value)) ?? [];
     } catch (err) {
       tierWrapper.innerHTML = "";
       tierInputs = [];
@@ -208,11 +279,9 @@ export function createDeployPanel(): { el: HTMLElement; render: () => void } {
       label.append(` ${tier.number}) ${tier.label}`);
       tierWrapper.appendChild(label);
     }
-    const region = state.deployConf?.dropletRegion?.trim() || "nyc3 (default)";
+    const region = regionSelect.value || state.deployConf?.dropletRegion?.trim() || "nyc3 (default)";
     tierStatus.textContent =
-      tiers.length > 0
-        ? ""
-        : `No price tiers are available in region ${region}. These droplet sizes aren't sold in every region — set DROPLET_REGION in the Config tab to one that offers them.`;
+      tiers.length > 0 ? "" : `No price tiers are available in region ${region} — pick another region above.`;
     refreshTiersButton.disabled = false;
     void render();
   }
@@ -229,7 +298,12 @@ export function createDeployPanel(): { el: HTMLElement; render: () => void } {
     if (!show) return;
 
     logPane.showGame(state.appName);
-    if (state.appName !== tiersLoadedForApp) void refreshTiers();
+    // Regions must load before tiers — refreshTiers reads regionSelect.value
+    // to decide which region to check.
+    if (state.appName !== tiersLoadedForApp) {
+      tiersLoadedForApp = state.appName;
+      void refreshRegions().then(refreshTiers);
+    }
     const running = isGameRunning("create", state.appName);
     const ready = Boolean(state.deployConfFound && state.opsDir && preflightPassed());
     el.dataset.disabled = ready && !running ? "false" : "true";

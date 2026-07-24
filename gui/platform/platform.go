@@ -49,3 +49,10 @@ func WSLAvailable() bool {
 func OpenFolder(path string) error {
 	return openFolder(path)
 }
+
+// OpenURL opens rawURL in the host's default browser. Like OpenFolder this
+// runs on the host, never through wsl.exe. Callers are responsible for
+// validating the scheme first (see app.go's OpenURL).
+func OpenURL(rawURL string) error {
+	return openURL(rawURL)
+}

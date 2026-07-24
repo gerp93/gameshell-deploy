@@ -34,9 +34,16 @@ func wslAvailable() bool {
 }
 
 func openFolder(path string) error {
-	opener := "xdg-open"
+	return exec.Command(desktopOpener(), path).Start()
+}
+
+func openURL(rawURL string) error {
+	return exec.Command(desktopOpener(), rawURL).Start()
+}
+
+func desktopOpener() string {
 	if runtime.GOOS == "darwin" {
-		opener = "open"
+		return "open"
 	}
-	return exec.Command(opener, path).Start()
+	return "xdg-open"
 }

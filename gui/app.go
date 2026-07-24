@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -245,10 +246,32 @@ func (a *App) ListSSHKeys() ([]string, error) {
 }
 
 // ListAvailableTiers returns the price tiers create.sh reports as available
-// in appName's configured region (deploy.conf's DROPLET_REGION), so the
-// deploy panel only offers tiers that won't fail with a 422 at create time.
-func (a *App) ListAvailableTiers(opsDir, appName string) ([]scriptrunner.TierOption, error) {
-	return scriptrunner.ListAvailableTiers(opsDir, appName)
+// in appName's region, so the deploy panel only offers tiers that won't fail
+// with a 422 at create time. region is optional — empty uses deploy.conf's
+// DROPLET_REGION, anything else checks that region instead.
+func (a *App) ListAvailableTiers(opsDir, appName, region string) ([]scriptrunner.TierOption, error) {
+	return scriptrunner.ListAvailableTiers(opsDir, appName, region)
+}
+
+// ListAvailableRegions returns the regions offering at least one price tier,
+// for the deploy panel's region override dropdown.
+func (a *App) ListAvailableRegions(opsDir, appName string) ([]scriptrunner.RegionOption, error) {
+	return scriptrunner.ListAvailableRegions(opsDir, appName)
+}
+
+// OpenURL opens rawURL in the operator's default browser — used for the
+// deployed app's public URL. Only http(s) is accepted: this value comes from
+// doctl output rather than being typed here, and handing an arbitrary scheme
+// to the OS opener is how a "URL" turns into a launched program.
+func (a *App) OpenURL(rawURL string) error {
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return err
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return fmt.Errorf("refusing to open non-http(s) URL: %s", rawURL)
+	}
+	return platform.OpenURL(rawURL)
 }
 
 // CheckStatus reports whether appName (deploy.conf's APP_NAME) already has a

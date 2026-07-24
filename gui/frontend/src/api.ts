@@ -53,6 +53,7 @@ export interface ExitInfo {
 export interface StatusResult {
   dropletExists: boolean;
   appExists: boolean;
+  appURL: string;
 }
 
 export interface TierOption {
@@ -62,11 +63,19 @@ export interface TierOption {
   label: string;
 }
 
+export interface RegionOption {
+  slug: string;
+  name: string;
+}
+
 export interface CreateRequest {
   opsDir: string;
   appName: string;
   sshKeyName: string;
   tier: string;
+  // Empty means "use deploy.conf's DROPLET_REGION"; otherwise overrides it
+  // for this deploy only.
+  region: string;
   autoYes: boolean;
   sqlUser: string;
   sqlPassword: string;
@@ -99,8 +108,11 @@ export const saveDeployConf = (opsDir: string, appName: string, conf: DeployConf
 
 export const runPreflightChecks = (): Promise<PreflightResult> => Backend.RunPreflightChecks();
 export const listSSHKeys = (): Promise<string[]> => Backend.ListSSHKeys();
-export const listAvailableTiers = (opsDir: string, appName: string): Promise<TierOption[]> =>
-  Backend.ListAvailableTiers(opsDir, appName);
+export const listAvailableTiers = (opsDir: string, appName: string, region: string): Promise<TierOption[]> =>
+  Backend.ListAvailableTiers(opsDir, appName, region);
+export const listAvailableRegions = (opsDir: string, appName: string): Promise<RegionOption[]> =>
+  Backend.ListAvailableRegions(opsDir, appName);
+export const openURL = (url: string): Promise<void> => Backend.OpenURL(url);
 export const checkStatus = (appName: string): Promise<StatusResult> => Backend.CheckStatus(appName);
 
 export const runCreate = (req: CreateRequest): Promise<void> => Backend.RunCreate(req);

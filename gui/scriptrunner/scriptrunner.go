@@ -45,10 +45,13 @@ type Emitter interface {
 
 // CreateRequest mirrors create.sh's positional arg + flags.
 type CreateRequest struct {
-	OpsDir        string `json:"opsDir"`
-	AppName       string `json:"appName"`
-	SSHKeyName    string `json:"sshKeyName"`
-	Tier          string `json:"tier"`
+	OpsDir     string `json:"opsDir"`
+	AppName    string `json:"appName"`
+	SSHKeyName string `json:"sshKeyName"`
+	Tier       string `json:"tier"`
+	// Region is optional and overrides deploy.conf's DROPLET_REGION for this
+	// deploy only (create.sh never rewrites the tracked config).
+	Region        string `json:"region"`
 	AutoYes       bool   `json:"autoYes"`
 	SQLUser       string `json:"sqlUser"`
 	SQLPassword   string `json:"sqlPassword"`
@@ -83,6 +86,9 @@ func RunCreate(req CreateRequest, emit Emitter) error {
 	}
 	if req.Tier != "" {
 		args = append(args, "--tier="+req.Tier)
+	}
+	if req.Region != "" {
+		args = append(args, "--region="+req.Region)
 	}
 	if req.AutoYes {
 		args = append(args, "--yes")
@@ -131,9 +137,16 @@ type TierOption struct {
 // backups, or the network beyond that check. Reusing the shell logic here
 // instead of reimplementing the jq/region-matching in Go keeps the GUI and
 // CLI paths from silently drifting apart.
-func ListAvailableTiers(opsDir, appName string) ([]TierOption, error) {
+// region is optional: empty means "whatever deploy.conf's DROPLET_REGION
+// says", anything else is passed through as --region= to check a region the
+// operator is considering without editing the tracked config.
+func ListAvailableTiers(opsDir, appName, region string) ([]TierOption, error) {
 	scriptPath := filepath.Join(opsDir, "create.sh")
-	cmd, err := platform.ScriptCommand(scriptPath, []string{appName, "--list-tiers"}, nil)
+	args := []string{appName, "--list-tiers"}
+	if region != "" {
+		args = append(args, "--region="+region)
+	}
+	cmd, err := platform.ScriptCommand(scriptPath, args, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -165,6 +178,42 @@ func ListAvailableTiers(opsDir, appName string) ([]TierOption, error) {
 	return tiers, nil
 }
 
+// RegionOption is one Digital Ocean region that offers at least one of the
+// price tiers, as reported by create.sh's --list-regions.
+type RegionOption struct {
+	Slug string `json:"slug"`
+	Name string `json:"name"`
+}
+
+// ListAvailableRegions runs `create.sh APP_NAME --list-regions`, the same
+// list create.sh's interactive retry prompt offers when the configured
+// region has no tiers available.
+func ListAvailableRegions(opsDir, appName string) ([]RegionOption, error) {
+	scriptPath := filepath.Join(opsDir, "create.sh")
+	cmd, err := platform.ScriptCommand(scriptPath, []string{appName, "--list-regions"}, nil)
+	if err != nil {
+		return nil, err
+	}
+	out, err := cmd.Output()
+	if err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			return nil, fmt.Errorf("create.sh --list-regions failed: %s", strings.TrimSpace(string(exitErr.Stderr)))
+		}
+		return nil, err
+	}
+
+	regions := []RegionOption{}
+	scanner := bufio.NewScanner(bytes.NewReader(out))
+	for scanner.Scan() {
+		fields := strings.Split(scanner.Text(), "\t")
+		if len(fields) != 2 {
+			continue
+		}
+		regions = append(regions, RegionOption{Slug: fields[0], Name: fields[1]})
+	}
+	return regions, nil
+}
+
 // ListSSHKeys runs `doctl compute ssh-key list` (via WSL on Windows) and
 // returns the key names for the deploy-panel dropdown.
 func ListSSHKeys() ([]string, error) {
@@ -194,6 +243,10 @@ func ListSSHKeys() ([]string, error) {
 type StatusResult struct {
 	DropletExists bool `json:"dropletExists"`
 	AppExists     bool `json:"appExists"`
+	// AppURL is the deployed app's public ingress URL, empty when no app
+	// exists (or when DO hasn't assigned one yet — it can lag briefly right
+	// after a deploy).
+	AppURL string `json:"appURL"`
 }
 
 // CheckStatus looks up appName (deploy.conf's APP_NAME, not the games/
@@ -204,14 +257,30 @@ func CheckStatus(appName string) (StatusResult, error) {
 	if err != nil {
 		return StatusResult{}, err
 	}
-	appOut, err := runDoctl("apps", "list", "--format=Spec.Name", "--no-header")
+	// Same DefaultIngress,Spec.Name pairing create.sh reads the URL from
+	// after a deploy, so the GUI reports exactly what the script would.
+	appOut, err := runDoctl("apps", "list", "--format=DefaultIngress,Spec.Name", "--no-header")
 	if err != nil {
 		return StatusResult{}, err
 	}
-	return StatusResult{
+	result := StatusResult{
 		DropletExists: containsLine(dropletOut, appName+"-database"),
-		AppExists:     containsLine(appOut, appName),
-	}, nil
+	}
+	scanner := bufio.NewScanner(strings.NewReader(appOut))
+	for scanner.Scan() {
+		fields := strings.Fields(scanner.Text())
+		// A freshly-created app can appear with no ingress assigned yet, so
+		// the name is the last field rather than a fixed index.
+		if len(fields) == 0 || !strings.Contains(fields[len(fields)-1], appName) {
+			continue
+		}
+		result.AppExists = true
+		if len(fields) > 1 {
+			result.AppURL = fields[0]
+		}
+		break
+	}
+	return result, nil
 }
 
 func runDoctl(args ...string) (string, error) {
