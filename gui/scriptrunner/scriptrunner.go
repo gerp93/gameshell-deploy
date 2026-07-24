@@ -145,7 +145,11 @@ func ListAvailableTiers(opsDir, appName string) ([]TierOption, error) {
 		return nil, err
 	}
 
-	var tiers []TierOption
+	// Non-nil so this marshals to [] rather than null when no tier is
+	// available in the configured region — that's a legitimate result (the
+	// AMD sizes aren't sold in every region, notably not the nyc3 default),
+	// not an error, and the frontend iterates what it gets back.
+	tiers := []TierOption{}
 	scanner := bufio.NewScanner(bytes.NewReader(out))
 	for scanner.Scan() {
 		fields := strings.Split(scanner.Text(), "\t")

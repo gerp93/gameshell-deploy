@@ -180,7 +180,7 @@ export function createDeployPanel(): { el: HTMLElement; render: () => void } {
 
     let tiers: TierOption[] = [];
     try {
-      tiers = await listAvailableTiers(state.opsDir, state.appName);
+      tiers = (await listAvailableTiers(state.opsDir, state.appName)) ?? [];
     } catch (err) {
       tierWrapper.innerHTML = "";
       tierInputs = [];
@@ -208,7 +208,11 @@ export function createDeployPanel(): { el: HTMLElement; render: () => void } {
       label.append(` ${tier.number}) ${tier.label}`);
       tierWrapper.appendChild(label);
     }
-    tierStatus.textContent = tiers.length > 0 ? "" : "No price tiers available in this region — update DROPLET_REGION in the Config tab.";
+    const region = state.deployConf?.dropletRegion?.trim() || "nyc3 (default)";
+    tierStatus.textContent =
+      tiers.length > 0
+        ? ""
+        : `No price tiers are available in region ${region}. These droplet sizes aren't sold in every region — set DROPLET_REGION in the Config tab to one that offers them.`;
     refreshTiersButton.disabled = false;
     void render();
   }
