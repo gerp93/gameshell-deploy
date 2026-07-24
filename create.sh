@@ -204,12 +204,13 @@ TIER_APP_SIZES=("basic-xs" "basic-s" "basic-m")
 TIER_LABELS=("\$17/month, \$0.02518/hour" "\$48/month, \$0.07155/hour" "\$96/month, \$0.14273/hour")
 
 # Prints "SLUG\tNAME" for every region offering at least one of the tiers
-# above. TIER_REGIONS is empty when the jq pre-check didn't run, in which
-# case every region is listed unfiltered — same "assume it's fine, let the
-# API be the judge" fallback the tier list itself uses without jq.
+# above. Only ever called once TIER_REGIONS has been populated — an empty
+# TIER_REGIONS means availability couldn't be determined, which is handled
+# as an error at the point of computation rather than silently degrading
+# into "every region qualifies" here.
 print_available_regions() {
 	doctl compute region list --format=Slug,Name --no-header | while read -r RSLUG RNAME; do
-		if [ -z "$TIER_REGIONS" ] || echo "$TIER_REGIONS" | grep -qx "$RSLUG"; then
+		if echo "$TIER_REGIONS" | grep -qx "$RSLUG"; then
 			printf '%s\t%s\n' "$RSLUG" "$RNAME"
 		fi
 	done
@@ -252,7 +253,21 @@ else
 		done
 	}
 
-	if [ "$QUERY_ONLY" -eq 1 ]; then
+	# No pairs means the size lookup told us nothing — a doctl hiccup, an
+	# auth/rate-limit failure, or an API shape change. Treating that as
+	# "no constraints" would quietly hand back every region and every tier,
+	# which is exactly how nyc3 (which sells none of these sizes) ends up
+	# offered as a valid choice. Query modes fail loudly instead; the
+	# interactive path degrades to the same permissive fallback as no-jq,
+	# where the operator sees the warning and the API is the final judge.
+	if [[ -z "$TIER_REGION_PAIRS" ]]; then
+		if [ "$QUERY_ONLY" -eq 1 ]; then
+			echo "Could not determine tier availability: 'doctl compute size list' returned no data for the expected sizes (${TIER_SLUGS[*]}). Check that doctl is authenticated and reachable, then try again." >&2
+			exit 4
+		fi
+		echo "*** Could not determine tier availability from 'doctl compute size list' — skipping the pre-check ***"
+		AVAILABLE_TIERS=(0 1 2)
+	elif [ "$QUERY_ONLY" -eq 1 ]; then
 		# Query mode: check once against the configured region and report
 		# whatever is found (possibly nothing) — no interactive region retry.
 		check_available_tiers

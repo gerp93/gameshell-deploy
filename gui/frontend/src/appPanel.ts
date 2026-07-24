@@ -1,5 +1,5 @@
 import { checkStatus, getOpsDir, listGames, loadDeployConf, loadSettings, selectApp } from "./api";
-import { state, notify } from "./state";
+import { state, notify, runningKind } from "./state";
 
 // Re-checks Digital Ocean status for the currently selected game — exported
 // so deployPanel/teardownPanel can call it once a run finishes, since a
@@ -89,6 +89,17 @@ export function createAppPanel(): { el: HTMLElement; render: () => void } {
       item.type = "button";
       item.className = "game-item" + (name === state.appName ? " active" : "");
       item.textContent = name;
+      // Mark games with a script in flight, so a deploy left running in the
+      // background is visible from the sidebar rather than only after
+      // selecting that game again.
+      const kind = runningKind(name);
+      if (kind) {
+        const dot = document.createElement("span");
+        dot.className = "game-item-running";
+        dot.textContent = "●";
+        dot.title = kind === "create" ? "Deploying…" : "Tearing down…";
+        item.appendChild(dot);
+      }
       item.onclick = () => void chooseApp(name);
       list.appendChild(item);
     }

@@ -2,6 +2,7 @@ import { runDelete } from "./api";
 import { createLogPane } from "./logPane";
 import { refreshStatus } from "./appPanel";
 import { state, preflightPassed, isDeployed, isGameRunning, getGameRun, notify } from "./state";
+import { createRunSummary } from "./runSummary";
 
 export function createTeardownPanel(): { el: HTMLElement; render: () => void } {
   const el = document.createElement("div");
@@ -82,8 +83,12 @@ export function createTeardownPanel(): { el: HTMLElement; render: () => void } {
     const gpgPassphrase = gpgPassphraseInput.value;
 
     // Mark this game as running immediately (before the first log line
-    // arrives) so the button/tab reflect it right away.
-    getGameRun("delete", appName).running = true;
+    // arrives) so the button/tab reflect it right away, and record what it's
+    // running with (never the passphrase itself).
+    const run = getGameRun("delete", appName);
+    run.running = true;
+    run.lastExit = undefined;
+    run.params = [["Back up database first", backup === "yes" ? "yes" : "no"]];
     teardownButton.disabled = true;
     gpgPassphraseInput.value = "";
     gpgConfirmInput.value = "";
@@ -106,16 +111,46 @@ export function createTeardownPanel(): { el: HTMLElement; render: () => void } {
   backupLabelNo.style.fontWeight = "normal";
   backupLabelNo.append(backupNo, " Skip backup");
 
-  el.append(backupLabelYes, backupLabelNo, gpgPassphraseWrap, gpgConfirmWrap, gpgMismatchWarning, teardownButton, logPane.el, status);
+  const runSummary = createRunSummary("delete");
 
-  function updateGPGVisibility() {
+  // Hidden while a teardown is in flight — same reasoning as the deploy
+  // panel: a run you switch back to should show progress, not a form.
+  const formParts = [
+    backupLabelYes,
+    backupLabelNo,
+    gpgPassphraseWrap,
+    gpgConfirmWrap,
+    gpgMismatchWarning,
+    teardownButton,
+  ];
+
+  el.append(
+    backupLabelYes,
+    backupLabelNo,
+    gpgPassphraseWrap,
+    gpgConfirmWrap,
+    gpgMismatchWarning,
+    teardownButton,
+    runSummary.el,
+    logPane.el,
+    status,
+  );
+
+  // Split from updateGPGVisibility so render() can re-apply it after
+  // restoring the form (which sets every part back to display:"") without
+  // recursing back into render().
+  function applyGPGVisibility() {
     const show = backupYes.checked;
     gpgPassphraseWrap.style.display = show ? "" : "none";
     gpgConfirmWrap.style.display = show ? "" : "none";
-    if (!show) {
+  }
+
+  function updateGPGVisibility() {
+    if (!backupYes.checked) {
       gpgPassphraseInput.value = "";
       gpgConfirmInput.value = "";
     }
+    applyGPGVisibility();
     render();
   }
   updateGPGVisibility();
@@ -125,13 +160,21 @@ export function createTeardownPanel(): { el: HTMLElement; render: () => void } {
   }
 
   function render() {
-    const deployed = isDeployed();
-    const show = Boolean(state.appName) && deployed === true;
+    // Mirror of the deploy panel: a teardown in flight outranks status
+    // (which flips to "not deployed" the moment the droplet goes, partway
+    // through the run), and a deploy in flight keeps this panel hidden even
+    // once its droplet starts existing.
+    const running = isGameRunning("delete", state.appName);
+    const deploying = isGameRunning("create", state.appName);
+    const show = Boolean(state.appName) && !deploying && (running || isDeployed() === true);
     el.style.display = show ? "" : "none";
     if (!show) return;
 
     logPane.showGame(state.appName);
-    const running = isGameRunning("delete", state.appName);
+    runSummary.render(state.appName, { running: "Tearing down", done: "Torn down" });
+    for (const part of formParts) part.style.display = running ? "none" : "";
+    if (!running) applyGPGVisibility();
+
     const ready = Boolean(state.opsDir && preflightPassed());
     el.dataset.disabled = ready && !running ? "false" : "true";
     const mismatch = gpgMismatch();

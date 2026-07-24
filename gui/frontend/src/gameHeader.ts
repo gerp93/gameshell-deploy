@@ -1,6 +1,6 @@
 import { deleteGame, openURL, renameGame, selectApp } from "./api";
 import { refreshGames } from "./appPanel";
-import { state, notify } from "./state";
+import { state, notify, runningKind } from "./state";
 
 // The selected game's name + deployed/not-deployed pill, shown above the
 // Config/Deploy tabs. Also owns the "Delete game" action — it's the one
@@ -220,6 +220,20 @@ export function createGameHeader(): { el: HTMLElement; render: () => void } {
     const appURL = state.status?.appURL ?? "";
     openAppButton.style.display = appURL ? "" : "none";
     appURLLine.textContent = appURL;
+
+    // Both of these move or destroy games/APP_NAME while a script is reading
+    // it. The Go side refuses when DO reports a live droplet/app, but early
+    // in a deploy nothing exists yet, so that check would wave it through —
+    // block on the run itself, which is the thing actually at risk.
+    const busy = runningKind(state.appName) !== null;
+    renameButton.disabled = busy;
+    deleteButton.disabled = busy;
+    const busyHint = busy ? "Not available while a deploy or teardown is running." : "";
+    renameButton.title = busyHint;
+    deleteButton.title = busyHint;
+    title.onclick = busy ? null : () => startRename();
+    title.style.cursor = busy ? "default" : "pointer";
+    title.title = busy ? busyHint : "Click to rename";
   }
 
   render();

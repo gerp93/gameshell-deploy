@@ -258,6 +258,54 @@ body {
   color: var(--text-muted);
 }
 
+/* --- run summary (shown above a deploy/teardown log) --------------------- */
+
+.run-summary {
+  margin: 0.25rem 0 0.75rem;
+}
+
+.run-summary-heading {
+  font-weight: 600;
+  font-size: 0.9rem;
+  margin-bottom: 0.4rem;
+}
+
+.run-summary-heading.running {
+  color: var(--accent);
+}
+
+.run-summary-heading.ok {
+  color: var(--ok);
+}
+
+.run-summary-heading.failed {
+  color: var(--fail);
+}
+
+/* Label/value pairs in two columns, labels muted so the values read first. */
+.run-summary-params {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.15rem 0.75rem;
+  margin: 0;
+  font-size: 0.82rem;
+}
+
+.run-summary-params dt {
+  color: var(--text-muted);
+}
+
+.run-summary-params dd {
+  margin: 0;
+}
+
+.game-item-running {
+  margin-left: 0.4rem;
+  color: var(--accent);
+  font-size: 0.7em;
+  vertical-align: middle;
+}
+
 /* --- tabs ---------------------------------------------------------------- */
 
 .tabs-wrapper {

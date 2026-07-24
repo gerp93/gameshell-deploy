@@ -38,6 +38,11 @@ export interface GameRun {
   running: boolean;
   lines: LogLine[];
   lastExit?: { code: number; err?: string };
+  // Label/value pairs describing what the run was launched with (region,
+  // tier, ssh key…), shown next to the log so a run you switch back to
+  // explains itself. Never holds secrets — the credential fields are
+  // cleared the moment a run starts and are never recorded here.
+  params?: Array<[string, string]>;
 }
 
 const MAX_LOG_LINES = 4000;
@@ -63,6 +68,17 @@ export function appendGameRunLine(kind: RunKind, line: LogLine): void {
 
 export function isGameRunning(kind: RunKind, appName: string): boolean {
   return getGameRun(kind, appName).running;
+}
+
+// Which script, if any, is currently running for this game. A run in flight
+// outranks Digital Ocean's reported status when deciding which panel to
+// show: mid-deploy the droplet already exists while the app doesn't, so
+// status alone reads as "deployed" and would wrongly offer Teardown.
+export function runningKind(appName: string): RunKind | null {
+  if (!appName) return null;
+  if (getGameRun("create", appName).running) return "create";
+  if (getGameRun("delete", appName).running) return "delete";
+  return null;
 }
 
 type Listener = () => void;

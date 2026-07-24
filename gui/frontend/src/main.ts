@@ -9,7 +9,7 @@ import { createTabs } from "./tabs";
 import { createThemeSwitcher } from "./themeSwitcher";
 import { createSpinner } from "./spinner";
 import { initRunTracking } from "./runTracking";
-import { state, subscribe, isDeployed } from "./state";
+import { state, subscribe, isDeployed, runningKind } from "./state";
 
 initRunTracking();
 
@@ -53,7 +53,14 @@ const tabs = createTabs(
   [
     {
       id: "action",
-      label: () => (isDeployed() === true ? "Teardown" : "Deploy"),
+      // While a script is running the label names what's happening, so the
+      // in-progress state is visible without opening the tab.
+      label: () => {
+        const kind = runningKind(state.appName);
+        if (kind === "create") return "Deploying…";
+        if (kind === "delete") return "Tearing down…";
+        return isDeployed() === true ? "Teardown" : "Deploy";
+      },
       el: actionTabContent,
       visible: () => state.deployConfFound,
     },

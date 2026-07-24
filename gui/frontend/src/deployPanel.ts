@@ -11,6 +11,7 @@ import {
 import { createLogPane } from "./logPane";
 import { refreshStatus } from "./appPanel";
 import { state, preflightPassed, isDeployed, isGameRunning, getGameRun, notify } from "./state";
+import { createRunSummary } from "./runSummary";
 
 export function createDeployPanel(): { el: HTMLElement; render: () => void } {
   const el = document.createElement("div");
@@ -155,8 +156,20 @@ export function createDeployPanel(): { el: HTMLElement; render: () => void } {
     const gpgPassphrase = gpgPassphraseInput.value;
 
     // Mark this game as running immediately (before the first log line
-    // arrives) so the button/tab reflect it right away.
-    getGameRun("create", appName).running = true;
+    // arrives) so the button/tab reflect it right away, and record the
+    // non-secret settings it's running with for the progress view.
+    const run = getGameRun("create", appName);
+    run.running = true;
+    // Clear the previous run's exit so the summary reads as in-progress
+    // rather than reporting a stale result. The log lines are intentionally
+    // kept: logPane appends incrementally and only redraws on a game
+    // switch, so emptying them here would desync it from the DOM.
+    run.lastExit = undefined;
+    run.params = [
+      ["SSH key", sshKeyName],
+      ["Region", regionSelect.value],
+      ["Price tier", tierInputs.find((i) => i.checked)?.parentElement?.textContent?.trim() ?? tier],
+    ];
     deployButton.disabled = true;
 
     // Clear secret fields from memory immediately once the run has been
@@ -187,7 +200,14 @@ export function createDeployPanel(): { el: HTMLElement; render: () => void } {
   actionRow.className = "row";
   actionRow.append(openBackupsButton, deployButton);
 
-  el.append(sshKeyWrap, regionWrap, tierWrap, credsGrid, backupWarning, actionRow, logPane.el);
+  const runSummary = createRunSummary("create");
+
+  // Everything the operator fills in — hidden while a run is in flight, so
+  // switching back to a deploying game shows its progress rather than an
+  // inert form implying it hasn't started.
+  const formParts = [sshKeyWrap, regionWrap, tierWrap, credsGrid, backupWarning, actionRow];
+
+  el.append(sshKeyWrap, regionWrap, tierWrap, credsGrid, backupWarning, actionRow, runSummary.el, logPane.el);
 
   async function refreshKeys() {
     sshKeySelect.innerHTML = "";
@@ -311,23 +331,31 @@ export function createDeployPanel(): { el: HTMLElement; render: () => void } {
   }
 
   async function render() {
-    const deployed = isDeployed();
-    const show = Boolean(state.appName) && deployed !== true;
+    // A create run in flight wins over Digital Ocean's status: mid-deploy
+    // the droplet exists before the app does, so status alone reads as
+    // "deployed" and this panel would hand over to Teardown partway through
+    // its own run.
+    const running = isGameRunning("create", state.appName);
+    const deleting = isGameRunning("delete", state.appName);
+    const show = Boolean(state.appName) && !deleting && (running || isDeployed() !== true);
     el.style.display = show ? "" : "none";
     if (!show) return;
 
     logPane.showGame(state.appName);
-    // Regions must load before tiers — refreshTiers reads regionSelect.value
-    // to decide which region to check.
-    if (state.appName !== tiersLoadedForApp) {
+    runSummary.render(state.appName, { running: "Deploying", done: "Deployed" });
+    for (const part of formParts) part.style.display = running ? "none" : "";
+
+    // Skip the availability checks entirely while a run is in flight — the
+    // form is hidden, and each check spawns its own script invocation.
+    if (!running && state.appName !== tiersLoadedForApp) {
       tiersLoadedForApp = state.appName;
       void refreshRegions().then(refreshTiers);
     }
-    const running = isGameRunning("create", state.appName);
     const ready = Boolean(state.deployConfFound && state.opsDir && preflightPassed());
     el.dataset.disabled = ready && !running ? "false" : "true";
     deployButton.disabled = !ready || running || !formFilled();
 
+    if (running) return; // the form (and this warning) is hidden anyway
     if (!state.deployConfFound) {
       backupWarning.textContent = "Fill in the Config tab before deploying.";
     } else if (!preflightPassed()) {
