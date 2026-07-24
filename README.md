@@ -55,6 +55,18 @@ export DEPLOY_SQL_PASSWORD=...
 
 Just pass the app name; config and backups are read from `games/{APP_NAME}/`.
 
+Restoring/creating a backup decrypts/encrypts it with `gpg`, which normally
+prompts interactively for the passphrase — fine in a terminal. To run
+non-interactively (e.g. from a GUI wrapper with no TTY for pinentry), set
+`GPG_PASSPHRASE` too; both scripts then use `gpg --batch --passphrase-fd`
+instead of prompting.
+
+Both scripts also accept flags so GUI wrappers can drive them
+non-interactively — `create.sh` takes `--ssh-key=NAME`, `--tier=1|2|3`, and
+`--yes` (auto-confirms the fork-sync push); `delete.sh` takes
+`--backup=yes|no`. Omit any of them and the matching interactive prompt runs
+as normal.
+
 If `deploy.conf` sets `GIT_UPSTREAM` (a fork's upstream repo, `owner/name`),
 `create.sh` checks it for commits not yet in `GIT_REPO` and offers to push
 them across before deploying — no local checkout of either repo is needed,

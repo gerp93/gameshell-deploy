@@ -2,10 +2,19 @@
 ################################################################################
 # Back up and delete a Digital Ocean instance of a gameshell-framework game.
 #
-# Usage:  ./delete.sh APP_NAME
+# Usage:  ./delete.sh APP_NAME [--backup=yes|no]
 #   APP_NAME is the game name (e.g., timeline-trivia, card-judge). Config is
 #   read from games/APP_NAME/deploy.conf. A new GPG-encrypted backup is
 #   written into games/APP_NAME/backups before teardown (unless declined).
+#
+#   --backup=yes|no  skip the backup prompt, use this answer
+#   This flag exists so GUI wrappers can drive this script non-interactively;
+#   omit it and the backup prompt below still runs as normal.
+#
+# Operator secret (optional): GPG_PASSPHRASE encrypts the new backup
+# non-interactively (--batch --passphrase-fd) instead of prompting via
+# pinentry. Needed when driven from the GUI, which has no TTY for pinentry
+# to use; omit it for normal interactive CLI use and gpg prompts as usual.
 ################################################################################
 
 set -e # exit on any command error
@@ -70,7 +79,22 @@ else
 	fi
 fi
 
-APP_NAME_ARG="${1:?Usage: ./delete.sh APP_NAME}"
+################################################################################
+# parse args
+
+BACKUP_FLAG=""
+APP_NAME_ARG=""
+for arg in "$@"; do
+	case "$arg" in
+		--backup=*) BACKUP_FLAG="${arg#*=}" ;;
+		-*)
+			echo "Unknown option: $arg"
+			exit 1
+			;;
+		*) APP_NAME_ARG="$arg" ;;
+	esac
+done
+: "${APP_NAME_ARG:?Usage: ./delete.sh APP_NAME [--backup=yes|no]}"
 GAME_CONFIG_DIR="$OPS_DIR/games/$APP_NAME_ARG"
 
 ################################################################################
@@ -100,7 +124,12 @@ DROPLET_ID=$(doctl compute droplet list --format=ID,Name --no-header | grep "$DR
 if [[ -z "$DROPLET_ID" ]]; then
 	echo "Droplet ID not found"
 else
-	read -p "Do you want to backup the database? [Y/n]: " BACKUP_DB
+	if [[ -n "$BACKUP_FLAG" ]]; then
+		BACKUP_DB=$( [[ "$BACKUP_FLAG" == "no" ]] && echo "n" || echo "y" )
+		echo "Backup database? $BACKUP_DB (from --backup)"
+	else
+		read -p "Do you want to backup the database? [Y/n]: " BACKUP_DB
+	fi
 	if [[ "$BACKUP_DB" != "n" ]]; then
 		echo "----------------------------------------"
 		echo "Backing Up Database..."
@@ -145,7 +174,11 @@ else
 
 		BACKUP_GPG_PATH="$BACKUP_SQL_PATH".gpg
 		rm -f "$BACKUP_GPG_PATH"
-		gpg -c --output "$BACKUP_GPG_PATH" "$BACKUP_SQL_PATH"
+		if [[ -n "$GPG_PASSPHRASE" ]]; then
+			gpg --batch --yes --pinentry-mode loopback --passphrase-fd 3 -c --output "$BACKUP_GPG_PATH" "$BACKUP_SQL_PATH" 3<<< "$GPG_PASSPHRASE"
+		else
+			gpg -c --output "$BACKUP_GPG_PATH" "$BACKUP_SQL_PATH"
+		fi
 
 		if [ ! -f "$BACKUP_GPG_PATH" ]; then
 			echo "File not found: $BACKUP_GPG_PATH"
