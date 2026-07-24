@@ -39,6 +39,11 @@ func RunChecks() Result {
 		checkTool("gpg", "GPG", "Install gpg (e.g. `sudo apt install gnupg` inside WSL, or `brew install gnupg` on macOS) — it encrypts/decrypts database backups."),
 		checkTool("ssh", "SSH", "Install an OpenSSH client (e.g. `sudo apt install openssh-client` inside WSL) — it's used to reach the database droplet."),
 		checkTool("scp", "SCP", "SCP normally ships with the OpenSSH client — install openssh-client if it's missing."),
+		// Optional for the CLI (create.sh warns and carries on without it),
+		// but required here: the GUI's region/tier dropdowns are built from
+		// create.sh's --list-regions/--list-tiers, which refuse to guess
+		// without jq rather than offer combinations that 422 at create time.
+		checkTool("jq", "jq", "Install jq (e.g. `sudo apt install jq` inside WSL, or `brew install jq` on macOS) — the Deploy tab's region and price tier lists are built from it."),
 	}
 
 	if platform.IsWindows() {

@@ -69,6 +69,7 @@ export function createDeployPanel(): { el: HTMLElement; render: () => void } {
   // DROPLET_REGION), so they're refetched whenever the selected game
   // changes rather than kept static — see refreshTiers()/render() below.
   let tiersLoadedForApp = "";
+  let tierCheckToken = 0;
   tierWrap.append(tierLabelRow, tierWrapper, tierStatus);
 
   const sqlUserWrap = document.createElement("div");
@@ -211,6 +212,11 @@ export function createDeployPanel(): { el: HTMLElement; render: () => void } {
     try {
       regions = (await listAvailableRegions(state.opsDir, state.appName)) ?? [];
     } catch (err) {
+      // Clear both lists: an unknown region set means the tiers currently
+      // on screen (if any) describe a region we can no longer vouch for.
+      regionSelect.innerHTML = "";
+      clearTiers();
+      tierStatus.textContent = "";
       regionStatus.textContent = `Could not load regions: ${err instanceof Error ? err.message : String(err)}`;
       return;
     }
@@ -234,8 +240,15 @@ export function createDeployPanel(): { el: HTMLElement; render: () => void } {
       regionSelect.value = regions[0].slug;
       regionStatus.textContent = `deploy.conf's region (${configured}) offers none of these tiers — using ${regionSelect.value} for this deploy. Set DROPLET_REGION in the Config tab to make it permanent.`;
     } else {
+      clearTiers();
+      tierStatus.textContent = "";
       regionStatus.textContent = "No regions offering these tiers were found.";
     }
+  }
+
+  function clearTiers() {
+    tierWrapper.innerHTML = "";
+    tierInputs = [];
   }
 
   // Populates tierWrapper with a radio button per tier create.sh's
@@ -247,22 +260,28 @@ export function createDeployPanel(): { el: HTMLElement; render: () => void } {
     tiersLoadedForApp = state.appName;
     const previouslyChecked = tierInputs.find((i) => i.checked)?.value;
     refreshTiersButton.disabled = true;
+    // Each check is stamped so a slow one that resolves after the operator
+    // has already switched region (or game) can't repopulate the radios
+    // with tiers for the region they moved away from.
+    const token = ++tierCheckToken;
+    const checkedRegion = regionSelect.value;
+    clearTiers();
     tierStatus.textContent = "Checking tier availability…";
 
     let tiers: TierOption[] = [];
     try {
-      tiers = (await listAvailableTiers(state.opsDir, state.appName, regionSelect.value)) ?? [];
+      tiers = (await listAvailableTiers(state.opsDir, state.appName, checkedRegion)) ?? [];
     } catch (err) {
-      tierWrapper.innerHTML = "";
-      tierInputs = [];
+      if (token !== tierCheckToken) return;
+      clearTiers();
       tierStatus.textContent = `Could not check tier availability: ${err instanceof Error ? err.message : String(err)}`;
       refreshTiersButton.disabled = false;
       void render();
       return;
     }
+    if (token !== tierCheckToken) return;
 
-    tierWrapper.innerHTML = "";
-    tierInputs = [];
+    clearTiers();
     for (const tier of tiers) {
       const label = document.createElement("label");
       label.style.fontWeight = "normal";

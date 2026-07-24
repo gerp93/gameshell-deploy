@@ -98,6 +98,8 @@ export const setTheme = (theme: string): Promise<void> => Backend.SetTheme(theme
 export const hasBackups = (opsDir: string, appName: string): Promise<boolean> => Backend.HasBackups(opsDir, appName);
 export const openBackupsFolder = (opsDir: string, appName: string): Promise<void> => Backend.OpenBackupsFolder(opsDir, appName);
 export const deleteGame = (opsDir: string, appName: string): Promise<void> => Backend.DeleteGame(opsDir, appName);
+export const renameGame = (opsDir: string, oldName: string, newName: string): Promise<void> =>
+  Backend.RenameGame(opsDir, oldName, newName);
 
 export const loadDeployConf = (opsDir: string, appName: string): Promise<DeployConfResult> =>
   Backend.LoadDeployConf(opsDir, appName);

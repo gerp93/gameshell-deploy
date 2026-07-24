@@ -220,10 +220,18 @@ print_available_regions() {
 # subset of 0/1/2 the region check below found available.
 TIER_REGIONS=""
 if ! command -v jq >/dev/null 2>&1; then
-	if [ "$QUERY_ONLY" -eq 0 ]; then
-		echo "*** No jq found, skipping tier availability pre-check ***"
-		echo "Install jq (e.g. 'brew install jq' on macOS, 'apt install jq' on Debian/Ubuntu) to run the tier availability pre-check against the configured region on future runs."
+	# The --list-* query modes must never guess. Their whole purpose is
+	# telling a caller what's actually available, and answering "all of
+	# them, everywhere" unchecked renders in a GUI as a confident list of
+	# tiers and regions that will 422 at create time — worse than saying
+	# nothing. Interactive CLI use keeps the permissive fallback below,
+	# where the operator sees the warning and the API is the final judge.
+	if [ "$QUERY_ONLY" -eq 1 ]; then
+		echo "jq is required for --list-tiers/--list-regions: it parses 'doctl compute size list' output to determine which tiers a region actually offers. Install jq (e.g. 'sudo apt install jq' on Debian/Ubuntu, 'brew install jq' on macOS) and try again." >&2
+		exit 3
 	fi
+	echo "*** No jq found, skipping tier availability pre-check ***"
+	echo "Install jq (e.g. 'brew install jq' on macOS, 'apt install jq' on Debian/Ubuntu) to run the tier availability pre-check against the configured region on future runs."
 	AVAILABLE_TIERS=(0 1 2) # no check ran, so assume all 3 are valid like before
 else
 	# "slug region" pairs, one per line, covering all 3 tiers at once. This

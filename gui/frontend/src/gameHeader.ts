@@ -1,4 +1,4 @@
-import { deleteGame, openURL } from "./api";
+import { deleteGame, openURL, renameGame, selectApp } from "./api";
 import { refreshGames } from "./appPanel";
 import { state, notify } from "./state";
 
@@ -15,7 +15,7 @@ export function createGameHeader(): { el: HTMLElement; render: () => void } {
   hint.textContent = "Select a game from the sidebar, or add a new one.";
 
   const titleRow = document.createElement("div");
-  titleRow.className = "row";
+  titleRow.className = "game-header-title";
   const title = document.createElement("h2");
   const pill = document.createElement("span");
 
@@ -37,12 +37,109 @@ export function createGameHeader(): { el: HTMLElement; render: () => void } {
     if (url) void openURL(url);
   };
 
-  titleRow.append(title, pill, openAppButton, deleteButton);
+  // Rename edits the games/ folder name only — deploy.conf's APP_NAME, which
+  // names the actual DO droplet/app, stays put and is edited in the Config
+  // tab. Clicking the title itself starts the edit, with the button as the
+  // discoverable affordance for that.
+  const renameButton = document.createElement("button");
+  renameButton.type = "button";
+  renameButton.className = "secondary";
+  renameButton.textContent = "Rename";
+  renameButton.onclick = () => startRename();
 
-  // The URL itself, shown as text so it's readable/copyable rather than
-  // hidden behind the button alone.
+  title.style.cursor = "pointer";
+  title.title = "Click to rename";
+  title.onclick = () => startRename();
+
+  const renameInput = document.createElement("input");
+  renameInput.style.display = "none";
+  renameInput.style.maxWidth = "18rem";
+  renameInput.onkeydown = (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      void commitRename();
+    } else if (e.key === "Escape") {
+      cancelRename();
+    }
+  };
+
+  const renameSave = document.createElement("button");
+  renameSave.type = "button";
+  renameSave.textContent = "Save";
+  renameSave.onclick = () => void commitRename();
+  const renameCancel = document.createElement("button");
+  renameCancel.type = "button";
+  renameCancel.className = "secondary";
+  renameCancel.textContent = "Cancel";
+  renameCancel.onclick = () => cancelRename();
+
+  const actions = document.createElement("div");
+  actions.className = "game-header-actions";
+  actions.append(openAppButton, renameButton, deleteButton);
+
+  const renameActions = document.createElement("div");
+  renameActions.className = "game-header-actions";
+  renameActions.style.display = "none";
+  renameActions.append(renameSave, renameCancel);
+
+  const renameError = document.createElement("div");
+  renameError.className = "status-line";
+
+  titleRow.append(title, renameInput, pill, actions, renameActions);
+
+  let renaming = false;
+
+  function startRename() {
+    renaming = true;
+    renameInput.value = state.appName;
+    renameError.textContent = "";
+    applyRenameVisibility();
+    renameInput.focus();
+    renameInput.select();
+  }
+
+  function cancelRename() {
+    renaming = false;
+    renameError.textContent = "";
+    applyRenameVisibility();
+  }
+
+  function applyRenameVisibility() {
+    title.style.display = renaming ? "none" : "";
+    renameInput.style.display = renaming ? "" : "none";
+    actions.style.display = renaming ? "none" : "";
+    renameActions.style.display = renaming ? "" : "none";
+  }
+
+  async function commitRename() {
+    const newName = renameInput.value.trim();
+    if (!newName || newName === state.appName) {
+      cancelRename();
+      return;
+    }
+    renameSave.disabled = true;
+    renameError.textContent = "";
+    try {
+      await renameGame(state.opsDir, state.appName, newName);
+      state.appName = newName;
+      // Persist it as the last-used game so a restart doesn't reopen the
+      // name that no longer exists.
+      await selectApp(newName);
+      renaming = false;
+      await refreshGames();
+    } catch (err) {
+      renameError.textContent = `Error: ${err instanceof Error ? err.message : String(err)}`;
+    } finally {
+      renameSave.disabled = false;
+      applyRenameVisibility();
+      notify();
+    }
+  }
+
+  // The URL itself, on its own line so it's readable and copyable rather
+  // than only reachable through the button.
   const appURLLine = document.createElement("div");
-  appURLLine.className = "hint";
+  appURLLine.className = "game-header-url";
 
   // Confirmation is inline rather than a native confirm() popup, so the
   // warning text (backups included, unrecoverable) is always visible
@@ -102,14 +199,18 @@ export function createGameHeader(): { el: HTMLElement; render: () => void } {
     }
   };
 
-  el.append(hint, titleRow, appURLLine, confirmBox);
+  el.append(hint, titleRow, renameError, appURLLine, confirmBox);
 
   function render() {
     if (confirmForApp !== null && confirmForApp !== state.appName) hideConfirm();
     const show = Boolean(state.appName);
     hint.style.display = show ? "none" : "";
     titleRow.style.display = show ? "" : "none";
-    if (!show) return;
+    if (!show) {
+      if (renaming) cancelRename();
+      return;
+    }
+    applyRenameVisibility();
 
     title.textContent = state.appName;
     const deployed = state.status ? state.status.dropletExists || state.status.appExists : null;

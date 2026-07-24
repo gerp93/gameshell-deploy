@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 
@@ -150,6 +151,49 @@ func (a *App) OpenBackupsFolder(opsDir, appName string) error {
 		return err
 	}
 	return platform.OpenFolder(dir)
+}
+
+// RenameGame renames the games/oldName directory to games/newName, moving
+// its deploy.conf and backups with it. This changes only the folder name the
+// sidebar lists — deploy.conf's own APP_NAME (which names the Digital Ocean
+// droplet/app) is edited separately in the Config tab, so this is safe to do
+// without touching cloud resources. Still refuses while a droplet/app is
+// live, since scripts are invoked by folder name and moving it mid-life
+// makes the running deployment harder to find.
+func (a *App) RenameGame(opsDir, oldName, newName string) error {
+	newName = strings.TrimSpace(newName)
+	if newName == "" {
+		return fmt.Errorf("new name cannot be empty")
+	}
+	// The name becomes a path segment under games/, so anything that could
+	// escape that directory or confuse path joining is rejected outright
+	// rather than sanitized into something the operator didn't ask for.
+	if strings.ContainsAny(newName, `/\`) || newName == "." || newName == ".." {
+		return fmt.Errorf("invalid game name: %s", newName)
+	}
+	if newName == oldName {
+		return nil
+	}
+
+	confResult, err := a.LoadDeployConf(opsDir, oldName)
+	if err != nil {
+		return err
+	}
+	if confResult.Found {
+		status, err := scriptrunner.CheckStatus(confResult.Conf.AppName)
+		if err != nil {
+			return fmt.Errorf("could not verify Digital Ocean status before renaming: %w", err)
+		}
+		if status.DropletExists || status.AppExists {
+			return fmt.Errorf("%s still has a droplet/app on Digital Ocean — tear it down before renaming", oldName)
+		}
+	}
+
+	newPath := gameConfigDir(opsDir, newName)
+	if _, err := os.Stat(newPath); err == nil {
+		return fmt.Errorf("a game named %s already exists", newName)
+	}
+	return os.Rename(gameConfigDir(opsDir, oldName), newPath)
 }
 
 // DeleteGame permanently removes games/appName — its deploy.conf and any
