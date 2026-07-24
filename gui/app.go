@@ -223,6 +223,13 @@ func (a *App) ListSSHKeys() ([]string, error) {
 	return scriptrunner.ListSSHKeys()
 }
 
+// ListAvailableTiers returns the price tiers create.sh reports as available
+// in appName's configured region (deploy.conf's DROPLET_REGION), so the
+// deploy panel only offers tiers that won't fail with a 422 at create time.
+func (a *App) ListAvailableTiers(opsDir, appName string) ([]scriptrunner.TierOption, error) {
+	return scriptrunner.ListAvailableTiers(opsDir, appName)
+}
+
 // CheckStatus reports whether appName (deploy.conf's APP_NAME) already has a
 // droplet/app on Digital Ocean, so the frontend knows whether it's set up
 // for a Deploy or a Teardown.

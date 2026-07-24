@@ -28,7 +28,25 @@ export function createTeardownPanel(): { el: HTMLElement; render: () => void } {
   gpgPassphraseLabel.textContent = "GPG_PASSPHRASE (only if backing up)";
   const gpgPassphraseInput = document.createElement("input");
   gpgPassphraseInput.type = "password";
+  gpgPassphraseInput.oninput = () => render();
   gpgPassphraseWrap.append(gpgPassphraseLabel, gpgPassphraseInput);
+
+  // Teardown-only: a typo'd passphrase here silently GPG-encrypts the
+  // backup with the wrong password before the droplet is gone, so there's
+  // no way to recover the mistake afterward — a confirmation field catches
+  // that before it happens. The deploy side doesn't need this: a wrong
+  // passphrase there just fails to decrypt an existing backup, loudly and
+  // recoverably, since nothing is destroyed.
+  const gpgConfirmWrap = document.createElement("div");
+  gpgConfirmWrap.className = "field";
+  const gpgConfirmLabel = document.createElement("label");
+  gpgConfirmLabel.textContent = "Confirm GPG_PASSPHRASE";
+  const gpgConfirmInput = document.createElement("input");
+  gpgConfirmInput.type = "password";
+  gpgConfirmInput.oninput = () => render();
+  gpgConfirmWrap.append(gpgConfirmLabel, gpgConfirmInput);
+  const gpgMismatchWarning = document.createElement("div");
+  gpgMismatchWarning.className = "status-line";
 
   const teardownButton = document.createElement("button");
   teardownButton.textContent = "Teardown";
@@ -68,6 +86,7 @@ export function createTeardownPanel(): { el: HTMLElement; render: () => void } {
     getGameRun("delete", appName).running = true;
     teardownButton.disabled = true;
     gpgPassphraseInput.value = "";
+    gpgConfirmInput.value = "";
     notify();
 
     await runDelete({
@@ -87,13 +106,23 @@ export function createTeardownPanel(): { el: HTMLElement; render: () => void } {
   backupLabelNo.style.fontWeight = "normal";
   backupLabelNo.append(backupNo, " Skip backup");
 
-  el.append(backupLabelYes, backupLabelNo, gpgPassphraseWrap, teardownButton, logPane.el, status);
+  el.append(backupLabelYes, backupLabelNo, gpgPassphraseWrap, gpgConfirmWrap, gpgMismatchWarning, teardownButton, logPane.el, status);
 
   function updateGPGVisibility() {
-    gpgPassphraseWrap.style.display = backupYes.checked ? "" : "none";
-    if (!backupYes.checked) gpgPassphraseInput.value = "";
+    const show = backupYes.checked;
+    gpgPassphraseWrap.style.display = show ? "" : "none";
+    gpgConfirmWrap.style.display = show ? "" : "none";
+    if (!show) {
+      gpgPassphraseInput.value = "";
+      gpgConfirmInput.value = "";
+    }
+    render();
   }
   updateGPGVisibility();
+
+  function gpgMismatch(): boolean {
+    return backupYes.checked && gpgPassphraseInput.value !== gpgConfirmInput.value;
+  }
 
   function render() {
     const deployed = isDeployed();
@@ -105,7 +134,9 @@ export function createTeardownPanel(): { el: HTMLElement; render: () => void } {
     const running = isGameRunning("delete", state.appName);
     const ready = Boolean(state.opsDir && preflightPassed());
     el.dataset.disabled = ready && !running ? "false" : "true";
-    teardownButton.disabled = !ready || running;
+    const mismatch = gpgMismatch();
+    teardownButton.disabled = !ready || running || mismatch;
+    gpgMismatchWarning.textContent = mismatch ? "GPG_PASSPHRASE and its confirmation don't match." : "";
     status.textContent = preflightPassed() ? "" : "Fix the failing Prerequisites checks above before tearing down.";
   }
 

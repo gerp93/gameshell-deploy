@@ -1,13 +1,7 @@
-import { hasBackups, listSSHKeys, openBackupsFolder, runCreate } from "./api";
+import { hasBackups, listAvailableTiers, listSSHKeys, openBackupsFolder, runCreate, type TierOption } from "./api";
 import { createLogPane } from "./logPane";
 import { refreshStatus } from "./appPanel";
 import { state, preflightPassed, isDeployed, isGameRunning, getGameRun, notify } from "./state";
-
-const TIERS: Array<{ value: string; label: string }> = [
-  { value: "1", label: "1) $17/month, $0.02518/hour" },
-  { value: "2", label: "2) $48/month, $0.07155/hour" },
-  { value: "3", label: "3) $96/month, $0.14273/hour" },
-];
 
 export function createDeployPanel(): { el: HTMLElement; render: () => void } {
   const el = document.createElement("div");
@@ -32,24 +26,23 @@ export function createDeployPanel(): { el: HTMLElement; render: () => void } {
   tierWrap.className = "field";
   const tierLabel = document.createElement("label");
   tierLabel.textContent = "Price tier";
+  const tierLabelRow = document.createElement("div");
+  tierLabelRow.className = "row";
+  const refreshTiersButton = document.createElement("button");
+  refreshTiersButton.type = "button";
+  refreshTiersButton.className = "secondary";
+  refreshTiersButton.textContent = "Refresh";
+  refreshTiersButton.onclick = () => void refreshTiers();
+  tierLabelRow.append(tierLabel, refreshTiersButton);
   const tierWrapper = document.createElement("div");
-  const tierInputs: HTMLInputElement[] = [];
-  for (const tier of TIERS) {
-    const label = document.createElement("label");
-    label.style.fontWeight = "normal";
-    label.style.textTransform = "none";
-    label.style.display = "block";
-    const input = document.createElement("input");
-    input.type = "radio";
-    input.name = "tier";
-    input.value = tier.value;
-    input.onchange = () => void render();
-    tierInputs.push(input);
-    label.appendChild(input);
-    label.append(" " + tier.label);
-    tierWrapper.appendChild(label);
-  }
-  tierWrap.append(tierLabel, tierWrapper);
+  const tierStatus = document.createElement("div");
+  tierStatus.className = "hint";
+  let tierInputs: HTMLInputElement[] = [];
+  // Tiers are region-specific (create.sh checks deploy.conf's
+  // DROPLET_REGION), so they're refetched whenever the selected game
+  // changes rather than kept static — see refreshTiers()/render() below.
+  let tiersLoadedForApp = "";
+  tierWrap.append(tierLabelRow, tierWrapper, tierStatus);
 
   const sqlUserWrap = document.createElement("div");
   sqlUserWrap.className = "field";
@@ -173,6 +166,53 @@ export function createDeployPanel(): { el: HTMLElement; render: () => void } {
     }
   }
 
+  // Populates tierWrapper with a radio button per tier create.sh's
+  // --list-tiers reports as available in this game's configured region.
+  // Preserves the previously-checked tier across a refresh when it's still
+  // on offer, so re-checking availability doesn't silently clear the
+  // operator's choice.
+  async function refreshTiers() {
+    if (!state.opsDir || !state.appName) return;
+    tiersLoadedForApp = state.appName;
+    const previouslyChecked = tierInputs.find((i) => i.checked)?.value;
+    refreshTiersButton.disabled = true;
+    tierStatus.textContent = "Checking tier availability…";
+
+    let tiers: TierOption[] = [];
+    try {
+      tiers = await listAvailableTiers(state.opsDir, state.appName);
+    } catch (err) {
+      tierWrapper.innerHTML = "";
+      tierInputs = [];
+      tierStatus.textContent = `Could not check tier availability: ${err instanceof Error ? err.message : String(err)}`;
+      refreshTiersButton.disabled = false;
+      void render();
+      return;
+    }
+
+    tierWrapper.innerHTML = "";
+    tierInputs = [];
+    for (const tier of tiers) {
+      const label = document.createElement("label");
+      label.style.fontWeight = "normal";
+      label.style.textTransform = "none";
+      label.style.display = "block";
+      const input = document.createElement("input");
+      input.type = "radio";
+      input.name = "tier";
+      input.value = String(tier.number);
+      input.checked = String(tier.number) === previouslyChecked;
+      input.onchange = () => void render();
+      tierInputs.push(input);
+      label.appendChild(input);
+      label.append(` ${tier.number}) ${tier.label}`);
+      tierWrapper.appendChild(label);
+    }
+    tierStatus.textContent = tiers.length > 0 ? "" : "No price tiers available in this region — update DROPLET_REGION in the Config tab.";
+    refreshTiersButton.disabled = false;
+    void render();
+  }
+
   function formFilled(): boolean {
     const tierChosen = tierInputs.some((i) => i.checked);
     return tierChosen && sqlUserInput.value.trim() !== "" && sqlPasswordInput.value.trim() !== "";
@@ -185,6 +225,7 @@ export function createDeployPanel(): { el: HTMLElement; render: () => void } {
     if (!show) return;
 
     logPane.showGame(state.appName);
+    if (state.appName !== tiersLoadedForApp) void refreshTiers();
     const running = isGameRunning("create", state.appName);
     const ready = Boolean(state.deployConfFound && state.opsDir && preflightPassed());
     el.dataset.disabled = ready && !running ? "false" : "true";

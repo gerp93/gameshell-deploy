@@ -55,6 +55,13 @@ export interface StatusResult {
   appExists: boolean;
 }
 
+export interface TierOption {
+  number: number;
+  slug: string;
+  appSize: string;
+  label: string;
+}
+
 export interface CreateRequest {
   opsDir: string;
   appName: string;
@@ -91,6 +98,8 @@ export const saveDeployConf = (opsDir: string, appName: string, conf: DeployConf
 
 export const runPreflightChecks = (): Promise<PreflightResult> => Backend.RunPreflightChecks();
 export const listSSHKeys = (): Promise<string[]> => Backend.ListSSHKeys();
+export const listAvailableTiers = (opsDir: string, appName: string): Promise<TierOption[]> =>
+  Backend.ListAvailableTiers(opsDir, appName);
 export const checkStatus = (appName: string): Promise<StatusResult> => Backend.CheckStatus(appName);
 
 export const runCreate = (req: CreateRequest): Promise<void> => Backend.RunCreate(req);

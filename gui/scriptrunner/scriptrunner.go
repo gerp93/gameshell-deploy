@@ -10,7 +10,9 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -109,6 +111,54 @@ func RunDelete(req DeleteRequest, emit Emitter) error {
 	}
 	scriptPath := filepath.Join(req.OpsDir, "delete.sh")
 	return run(req.AppName, scriptPath, args, env, "delete", emit)
+}
+
+// TierOption is one price tier create.sh's --list-tiers reported as
+// available in the game's configured region. Number is the stable 1-based
+// tier number create.sh's --tier= flag expects back — it does NOT shift
+// based on which tiers are available (see create.sh's "get price tier"
+// section for why that distinction matters).
+type TierOption struct {
+	Number  int    `json:"number"`
+	Slug    string `json:"slug"`
+	AppSize string `json:"appSize"`
+	Label   string `json:"label"`
+}
+
+// ListAvailableTiers runs `create.sh APP_NAME --list-tiers`, which performs
+// the same region-availability check create.sh itself runs before deploying
+// (see its "get price tier" section) and exits without touching secrets,
+// backups, or the network beyond that check. Reusing the shell logic here
+// instead of reimplementing the jq/region-matching in Go keeps the GUI and
+// CLI paths from silently drifting apart.
+func ListAvailableTiers(opsDir, appName string) ([]TierOption, error) {
+	scriptPath := filepath.Join(opsDir, "create.sh")
+	cmd, err := platform.ScriptCommand(scriptPath, []string{appName, "--list-tiers"}, nil)
+	if err != nil {
+		return nil, err
+	}
+	out, err := cmd.Output()
+	if err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			return nil, fmt.Errorf("create.sh --list-tiers failed: %s", strings.TrimSpace(string(exitErr.Stderr)))
+		}
+		return nil, err
+	}
+
+	var tiers []TierOption
+	scanner := bufio.NewScanner(bytes.NewReader(out))
+	for scanner.Scan() {
+		fields := strings.Split(scanner.Text(), "\t")
+		if len(fields) != 4 {
+			continue
+		}
+		number, err := strconv.Atoi(fields[0])
+		if err != nil {
+			continue
+		}
+		tiers = append(tiers, TierOption{Number: number, Slug: fields[1], AppSize: fields[2], Label: fields[3]})
+	}
+	return tiers, nil
 }
 
 // ListSSHKeys runs `doctl compute ssh-key list` (via WSL on Windows) and
