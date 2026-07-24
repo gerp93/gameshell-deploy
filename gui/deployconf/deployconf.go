@@ -21,6 +21,7 @@ type DeployConf struct {
 	HTTPPort      string `json:"httpPort"`
 	GitRepo       string `json:"gitRepo"`
 	GitUpstream   string `json:"gitUpstream"`
+	GitBranch     string `json:"gitBranch"`
 	DropletRegion string `json:"dropletRegion"`
 	DropletImage  string `json:"dropletImage"`
 	DropletSize   string `json:"dropletSize"`
@@ -38,6 +39,7 @@ var fields = []field{
 	{"HTTP_PORT", func(c *DeployConf) *string { return &c.HTTPPort }},
 	{"GIT_REPO", func(c *DeployConf) *string { return &c.GitRepo }},
 	{"GIT_UPSTREAM", func(c *DeployConf) *string { return &c.GitUpstream }},
+	{"GIT_BRANCH", func(c *DeployConf) *string { return &c.GitBranch }},
 	{"DROPLET_REGION", func(c *DeployConf) *string { return &c.DropletRegion }},
 	{"DROPLET_IMAGE", func(c *DeployConf) *string { return &c.DropletImage }},
 	{"DROPLET_SIZE", func(c *DeployConf) *string { return &c.DropletSize }},

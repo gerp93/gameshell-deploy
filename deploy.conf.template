@@ -29,6 +29,12 @@ GIT_REPO=owner/my-game
 # skip the fork-sync step entirely.
 GIT_UPSTREAM=
 
+# Optional: branch DO App Platform deploys (and that the fork-sync step above
+# syncs). Leave blank to use the repo's own default branch, which is detected
+# rather than assumed — don't set this to "main" just to be explicit, or a repo
+# whose default is something else will silently deploy the wrong branch.
+GIT_BRANCH=
+
 # Optional droplet overrides (defaults shown).
 DROPLET_REGION=nyc3
 DROPLET_IMAGE=centos-stream-9-x64

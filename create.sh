@@ -10,6 +10,9 @@
 #   (see deploy.conf.template) and a backups/ directory holding at least one
 #   GPG-encrypted database backup (*.sql.gpg).
 #
+#   The branch deployed comes from deploy.conf's GIT_BRANCH; left blank, the
+#   repo's own default branch is detected and used.
+#
 #   --ssh-key=NAME  skip the SSH key prompt, use this key name
 #   --tier=1|2|3    skip the price tier prompt, use this tier. The number
 #                   always refers to the same tier (1=xs/2=s/3=m) regardless
@@ -358,6 +361,34 @@ if [[ -z "$DEPLOY_SQL_PASSWORD" ]]; then
 fi
 
 ################################################################################
+# resolve the branch to deploy
+#
+# GIT_BRANCH is optional. Left blank it resolves to the repo's own default
+# branch, detected the same way the fork-sync step below detects it — the
+# old card-judge-only script hardcoded "main" here, which silently deploys
+# the wrong branch for any repo whose default is something else.
+#
+# Resolved before the backup is decrypted and long before the droplet is
+# created, so a branch that doesn't exist fails here rather than after
+# there's a droplet to clean up.
+
+GIT_REPO_URL="https://github.com/$GIT_REPO.git"
+
+echo "----------------------------------------"
+if [[ -z "$GIT_BRANCH" ]]; then
+	GIT_BRANCH=$(git ls-remote --symref "$GIT_REPO_URL" HEAD | sed -n 's#^ref: refs/heads/\(.*\)\tHEAD$#\1#p')
+	: "${GIT_BRANCH:?could not determine the default branch of $GIT_REPO — set GIT_BRANCH in deploy.conf}"
+	echo "Deploying Branch: $GIT_BRANCH (default branch of $GIT_REPO)"
+else
+	if ! git ls-remote --exit-code --heads "$GIT_REPO_URL" "$GIT_BRANCH" >/dev/null 2>&1; then
+		echo "Branch not found in $GIT_REPO: $GIT_BRANCH"
+		echo "Fix GIT_BRANCH in games/$APP_NAME_ARG/deploy.conf (leave it blank to use the repo's default branch)."
+		exit 1
+	fi
+	echo "Deploying Branch: $GIT_BRANCH (from deploy.conf)"
+fi
+
+################################################################################
 # get latest database backup (optional)
 
 BACKUP_DIR="$GAME_CONFIG_DIR/backups"
@@ -410,9 +441,8 @@ sed \
 
 if [[ -n "$GIT_UPSTREAM" && "$GIT_UPSTREAM" != "$GIT_REPO" ]]; then
 	echo "----------------------------------------"
-	echo "Checking Fork Sync ($GIT_REPO vs $GIT_UPSTREAM)..."
+	echo "Checking Fork Sync ($GIT_REPO vs $GIT_UPSTREAM, branch $GIT_BRANCH)..."
 
-	GIT_REPO_URL="https://github.com/$GIT_REPO.git"
 	GIT_UPSTREAM_URL="https://github.com/$GIT_UPSTREAM.git"
 
 	SYNC_DIR=$(mktemp -d)
@@ -421,14 +451,11 @@ if [[ -n "$GIT_UPSTREAM" && "$GIT_UPSTREAM" != "$GIT_REPO" ]]; then
 		cd "$SYNC_DIR"
 		git init -q
 
-		# Old card-judge-only version of this script hardcoded "main" here.
-		# This is generic across games now, so the default branch can't be
-		# assumed — detect it instead of hardcoding it.
-		DEFAULT_BRANCH=$(git ls-remote --symref "$GIT_REPO_URL" HEAD | sed -n 's#^ref: refs/heads/\(.*\)\tHEAD$#\1#p')
-		: "${DEFAULT_BRANCH:?could not determine default branch of $GIT_REPO}"
-
-		git fetch -q "$GIT_REPO_URL" "$DEFAULT_BRANCH":origin-head
-		git fetch -q "$GIT_UPSTREAM_URL" "$DEFAULT_BRANCH":upstream-head
+		# Syncs the branch being deployed, resolved above — syncing one
+		# branch while deploying another would push commits nobody is about
+		# to run, and leave the deployed branch stale.
+		git fetch -q "$GIT_REPO_URL" "$GIT_BRANCH":origin-head
+		git fetch -q "$GIT_UPSTREAM_URL" "$GIT_BRANCH":upstream-head
 
 		COMMITS_TO_PUSH=$(git log origin-head..upstream-head --oneline)
 		if [[ -z "$COMMITS_TO_PUSH" ]]; then
@@ -438,11 +465,11 @@ if [[ -n "$GIT_UPSTREAM" && "$GIT_UPSTREAM" != "$GIT_REPO" ]]; then
 			echo "$COMMITS_TO_PUSH"
 			if [[ "$AUTO_YES" -eq 1 ]]; then
 				echo "Auto-confirming push (--yes)"
-				git push "$GIT_REPO_URL" upstream-head:"$DEFAULT_BRANCH"
+				git push "$GIT_REPO_URL" upstream-head:"$GIT_BRANCH"
 			else
 				read -p "Do you want to continue with the push? (y/N): " CONFIRM_PUSH
 				if [[ "$CONFIRM_PUSH" =~ ^[Yy]$ ]]; then
-					git push "$GIT_REPO_URL" upstream-head:"$DEFAULT_BRANCH"
+					git push "$GIT_REPO_URL" upstream-head:"$GIT_BRANCH"
 				else
 					echo "Push cancelled by user. Exiting script."
 					exit 1
@@ -605,6 +632,7 @@ sed \
 	-e "s/REPLACE_HTTP_PORT/${HTTP_PORT}/g" \
 	-e "s/REPLACE_APP_SIZE/${APP_SIZE}/g" \
 	-e "s|REPLACE_GIT_REPO|${GIT_REPO}|g" \
+	-e "s|REPLACE_GIT_BRANCH|${GIT_BRANCH}|g" \
 	"$OPS_DIR/templates/spec.yaml" > "$APP_SPEC_PATH"
 
 APP_URL=$(

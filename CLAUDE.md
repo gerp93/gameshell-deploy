@@ -37,8 +37,8 @@ encrypts database backups at rest.
 - **Config** (this repo, per-game, tracked): `games/APP_NAME/deploy.conf`,
   copied from [deploy.conf.template](deploy.conf.template) — `APP_NAME`,
   `ENV_VAR_PREFIX`, `DB_NAME`, `HTTP_PORT`, `GIT_REPO`, optional `GIT_UPSTREAM`/
-  droplet overrides. Only non-secret values live in `deploy.conf`, so it's
-  safe to commit.
+  `GIT_BRANCH`/droplet overrides. Only non-secret values live in
+  `deploy.conf`, so it's safe to commit.
 - **Data** (this repo, per-game, git-ignored): `games/APP_NAME/backups/`, a
   directory of GPG-encrypted database dumps (`*.sql.gpg`). The whole
   `backups/` directory is git-ignored (`games/*/backups/` in
@@ -70,6 +70,14 @@ and fork-sync a game — DO App Platform clones `GIT_REPO` directly, and
 `create.sh`'s fork-sync step fetches both remotes by URL into a throwaway
 git dir. Neither needs a local checkout of the game repo anywhere in this
 flow.
+
+`GIT_BRANCH` is optional and selects the branch deployed (and fork-synced).
+Left blank it resolves to the repo's own default branch, detected via
+`git ls-remote --symref`. **Don't reintroduce a hardcoded `main`** — the
+template used to carry `branch: main`, which silently deploys the wrong
+branch for any repo whose default differs. It's also validated against the
+remote before the droplet is created, so a typo fails before there are
+cloud resources to clean up.
 
 ## Bash conventions (match these exactly)
 

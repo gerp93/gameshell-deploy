@@ -35,7 +35,7 @@ services:
     scope: RUN_AND_BUILD_TIME
     value: REPLACE_DB_NAME
   github:
-    branch: main
+    branch: REPLACE_GIT_BRANCH
     repo: REPLACE_GIT_REPO
   http_port: REPLACE_HTTP_PORT
   instance_count: 1

@@ -17,6 +17,7 @@ export interface DeployConf {
   httpPort: string;
   gitRepo: string;
   gitUpstream: string;
+  gitBranch: string;
   dropletRegion: string;
   dropletImage: string;
   dropletSize: string;

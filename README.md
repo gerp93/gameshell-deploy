@@ -72,6 +72,11 @@ If `deploy.conf` sets `GIT_UPSTREAM` (a fork's upstream repo, `owner/name`),
 them across before deploying — no local checkout of either repo is needed,
 it fetches both directly by URL.
 
+`GIT_BRANCH` selects which branch is deployed, and which one that fork-sync
+compares and pushes. Leave it blank to use the repo's own default branch,
+which `create.sh` detects rather than assuming `main`. A branch that doesn't
+exist on the remote is caught before the droplet is created.
+
 ## How env vars line up
 
 `ENV_VAR_PREFIX` in `deploy.conf` is the single value that keeps the app and its
