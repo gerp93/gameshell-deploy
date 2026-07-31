@@ -10,7 +10,7 @@ import {
 } from "./api";
 import { createLogPane } from "./logPane";
 import { refreshStatus, scheduleStatusReconcile } from "./appPanel";
-import { state, preflightPassed, isDeployed, isGameRunning, getGameRun, notify } from "./state";
+import { state, preflightPassed, isDeployed, isGameRunning, getGameRun, clearGameRun, notify } from "./state";
 import { createRunSummary } from "./runSummary";
 
 export function createDeployPanel(): { el: HTMLElement; render: () => void } {
@@ -138,6 +138,11 @@ export function createDeployPanel(): { el: HTMLElement; render: () => void } {
         // create.sh just finished successfully.
         await refreshStatus();
         state.status = { dropletExists: true, appExists: true, appURL: state.status?.appURL ?? "" };
+        // Whatever teardown history existed for this game was for a
+        // deployment that no longer exists — a successful deploy makes it
+        // stale, and leaving it in place is what made switching to
+        // Teardown right after deploying show an unrelated old run.
+        clearGameRun("delete", info.appName);
       } else {
         await refreshStatus();
       }
@@ -161,13 +166,9 @@ export function createDeployPanel(): { el: HTMLElement; render: () => void } {
     // Mark this game as running immediately (before the first log line
     // arrives) so the button/tab reflect it right away, and record the
     // non-secret settings it's running with for the progress view.
+    clearGameRun("create", appName);
     const run = getGameRun("create", appName);
     run.running = true;
-    // Clear the previous run's exit so the summary reads as in-progress
-    // rather than reporting a stale result. The log lines are intentionally
-    // kept: logPane appends incrementally and only redraws on a game
-    // switch, so emptying them here would desync it from the DOM.
-    run.lastExit = undefined;
     run.params = [
       ["SSH key", sshKeyName],
       ["Region", regionSelect.value],
