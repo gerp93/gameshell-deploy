@@ -47,6 +47,12 @@ jobs:
       - name: Create and push tag
         run: |
           set -e
+          # An annotated tag needs a committer, and the runner has no git
+          # identity configured by default — this is the standard identity
+          # GitHub's own actions (e.g. actions/checkout's auto-commit
+          # helpers) use for machine-authored commits/tags.
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           VERSION="${{ steps.version.outputs.version }}"
           git tag -a "$VERSION" -m "$VERSION"
           git push origin "$VERSION"
