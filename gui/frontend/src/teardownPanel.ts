@@ -1,7 +1,7 @@
 import { runDelete } from "./api";
 import { createLogPane } from "./logPane";
 import { refreshStatus, scheduleStatusReconcile } from "./appPanel";
-import { state, preflightPassed, isDeployed, isGameRunning, getGameRun, notify } from "./state";
+import { state, preflightPassed, isDeployed, isGameRunning, getGameRun, clearGameRun, notify } from "./state";
 import { createRunSummary } from "./runSummary";
 
 export function createTeardownPanel(): { el: HTMLElement; render: () => void } {
@@ -68,6 +68,11 @@ export function createTeardownPanel(): { el: HTMLElement; render: () => void } {
       // failure (partial/unknown state) needs a real re-check.
       if (info.code === 0) {
         state.status = { dropletExists: false, appExists: false, appURL: "" };
+        // Whatever deploy history existed for this game was for the
+        // deployment that just got torn down — a successful teardown makes
+        // it stale, and leaving it in place is what made switching to
+        // Deploy right after tearing down show an unrelated old run.
+        clearGameRun("create", info.appName);
       } else {
         await refreshStatus();
       }
@@ -86,9 +91,9 @@ export function createTeardownPanel(): { el: HTMLElement; render: () => void } {
     // Mark this game as running immediately (before the first log line
     // arrives) so the button/tab reflect it right away, and record what it's
     // running with (never the passphrase itself).
+    clearGameRun("delete", appName);
     const run = getGameRun("delete", appName);
     run.running = true;
-    run.lastExit = undefined;
     run.params = [["Back up database first", backup === "yes" ? "yes" : "no"]];
     teardownButton.disabled = true;
     gpgPassphraseInput.value = "";

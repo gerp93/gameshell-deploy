@@ -66,6 +66,20 @@ export function appendGameRunLine(kind: RunKind, line: LogLine): void {
   }
 }
 
+// Wipes a kind's buffered log/exit/params for a game — called both when a
+// fresh run of that same kind starts (so it doesn't open showing the
+// previous run's tail) and, from the *other* kind's finish handler, when
+// that kind's history no longer describes anything real: a successful
+// deploy means whatever teardown history existed was for a deployment that
+// no longer exists, and vice versa. Doesn't touch `running`, since this is
+// never called on a run that's actually in flight.
+export function clearGameRun(kind: RunKind, appName: string): void {
+  const run = getGameRun(kind, appName);
+  run.lines = [];
+  run.lastExit = undefined;
+  run.params = undefined;
+}
+
 export function isGameRunning(kind: RunKind, appName: string): boolean {
   return getGameRun(kind, appName).running;
 }

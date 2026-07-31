@@ -4,10 +4,13 @@ import { onLine, onFinish } from "./runTracking";
 
 export interface LogPane {
   el: HTMLDivElement;
-  // Call whenever the selected game changes — redraws from that game's own
-  // buffered history (see state.ts's GameRun) instead of clearing it, so
-  // switching back to a game mid-run (or after it's finished) still shows
-  // its output.
+  // Call whenever the selected game changes, or anything else might have
+  // touched this game's buffered history (see state.ts's GameRun) — always
+  // redraws from that history rather than only on an appName change, so a
+  // history cleared elsewhere (a fresh run starting, or the opposing kind's
+  // stale log being cleared after this one finishes — see deployPanel.ts/
+  // teardownPanel.ts) is reflected the next time anything re-renders,
+  // without this pane needing a direct reference to whatever mutated it.
   showGame(appName: string): void;
 }
 
@@ -61,7 +64,6 @@ export function createLogPane(kind: RunKind, onFinished: (info: ExitInfo) => voi
   return {
     el,
     showGame(appName: string) {
-      if (appName === currentApp) return;
       currentApp = appName;
       redraw();
     },

@@ -1,4 +1,4 @@
-import { checkStatus, getOpsDir, listGames, loadDeployConf, loadSettings, selectApp } from "./api";
+import { checkStatus, getOpsDir, listGames, loadDeployConf, loadSettings, selectApp, type StatusResult } from "./api";
 import { state, notify, runningKind } from "./state";
 
 // Re-checks Digital Ocean status for the currently selected game — exported
@@ -19,18 +19,60 @@ export async function refreshStatus(): Promise<void> {
 // it is wrong the UI stays wrong until the operator reselects the game —
 // which is how a finished teardown can sit there still offering Teardown.
 // This reconciles against the real API once the lag has passed.
+//
+// A single disagreeing read isn't trusted on its own: DO's list endpoints
+// can lag in EITHER direction — a just-deleted droplet/app can still show
+// up as existing for a few seconds too, not just a just-created one being
+// missing. Trusting the first disagreement outright is what made a
+// successful teardown flip back to showing Teardown a few seconds later,
+// even though the optimistic "not deployed" was the correct answer and DO
+// just hadn't caught up to its own deletion yet. Requiring two consecutive
+// disagreeing reads, spaced delayMs apart, filters that out while still
+// self-healing a genuinely wrong optimistic value (which keeps disagreeing).
 export function scheduleStatusReconcile(appName: string, delayMs = 6000): void {
+  const deployed = (s: StatusResult) => s.dropletExists || s.appExists;
+
+  async function probe(): Promise<StatusResult | null> {
+    // Skip if the operator moved on, or a new run started — that run now
+    // owns this game's status and will reconcile when it finishes.
+    if (state.appName !== appName || runningKind(appName) || !state.deployConf?.appName) return null;
+    try {
+      return await checkStatus(state.deployConf.appName);
+    } catch {
+      return null; // a failed re-check shouldn't clobber the optimistic value
+    }
+  }
+
   setTimeout(() => {
     void (async () => {
-      // Skip if the operator moved on, or a new run started — that run now
-      // owns this game's status and will reconcile when it finishes.
-      if (state.appName !== appName || runningKind(appName)) return;
-      try {
-        await refreshStatus();
-      } catch {
-        return; // a failed re-check shouldn't clobber the optimistic value
+      const optimistic = state.status;
+      const first = await probe();
+      if (!first) return;
+      if (!optimistic || deployed(first) === deployed(optimistic)) {
+        // Agrees (or there was nothing to compare against) — safe to apply
+        // immediately, this also picks up incidental changes like a
+        // just-assigned app URL.
+        state.status = first;
+        notify();
+        return;
       }
-      notify();
+
+      // Disagrees with the optimistic value — could be genuine staleness,
+      // or DO's list API still catching up to the create/delete that just
+      // happened. Check again before trusting it.
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+      const second = await probe();
+      if (!second) return;
+      if (deployed(second) === deployed(first)) {
+        // Two consecutive reads agree with each other, and both disagree
+        // with the optimistic value — it really was wrong.
+        state.status = second;
+        notify();
+      }
+      // Otherwise: the second read no longer agrees with the first either
+      // (still settling) — leave the optimistic value in place rather than
+      // act on an unstable reading. A later manual refresh/reselect will
+      // pick up wherever it lands.
     })();
   }, delayMs);
 }
