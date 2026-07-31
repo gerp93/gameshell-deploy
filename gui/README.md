@@ -1,0 +1,69 @@
+# gameshell-deploy GUI
+
+A desktop app (Wails, Go) that wraps `create.sh`/`delete.sh` for operators
+who prefer clicking a button over running them from a terminal. See the
+`gui/` exception noted in [../CLAUDE.md](../CLAUDE.md) — this is the one
+non-bash corner of the repo.
+
+It does not reimplement any deploy logic: it shells out to the tracked
+`create.sh`/`delete.sh` in the same checkout it's running from (auto-detected
+from its own location — see `app.go`'s `GetOpsDir`), using their
+`--ssh-key`/`--tier`/`--yes`/`--backup` flags to drive them non-interactively,
+and streams their real stdout/stderr into a log pane. The deploy panel's
+tier picker is likewise not reimplemented in Go — it calls
+`create.sh APP_NAME --list-tiers` (see `scriptrunner.ListAvailableTiers`) to
+run the same region-availability check create.sh itself runs before
+deploying, so the two never drift apart on which tiers are actually
+sellable in the configured region.
+
+## Download
+
+Prebuilt Windows, Linux, and macOS releases are published under
+[Releases](https://github.com/gerp93/gameshell-deploy/releases) — download
+the archive for your OS, extract it, and run `gameshell-deploy-gui`
+(`.exe` on Windows) from wherever you extracted it. It needs the other
+files in that archive alongside it: `create.sh`, `templates/`,
+`deploy.conf.template`, `games/`. No Go/Node/Wails install needed to run it, only to build it
+yourself (see below). New releases are built by
+`.github/workflows/release.yml` whenever a `vX.Y.Z` tag is pushed. On
+Linux/macOS you'll likely need to mark the binary executable first:
+`chmod +x gameshell-deploy-gui`.
+
+## Prerequisites
+
+- Go 1.25+, Node 18+, and the [Wails CLI](https://wails.io/docs/gettingstarted/installation)
+  (`go install github.com/wailsapp/wails/v2/cmd/wails@latest`).
+- Everything `create.sh`/`delete.sh` themselves need: `doctl` (authenticated),
+  `gpg`, `ssh`/`scp`. The app's Preflight panel checks for these at startup.
+- **On Windows**: [WSL](https://learn.microsoft.com/windows/wsl/install) with
+  `doctl`/`gpg`/`ssh` installed inside it — the app shells every script
+  invocation through `wsl.exe`.
+
+## Development
+
+```bash
+cd gui
+wails dev
+```
+
+## Building
+
+```bash
+cd gui
+wails build
+```
+
+Produces a native binary under `gui/build/bin/`.
+
+## Layout
+
+- `platform/` — OS-specific command building (native on macOS/Linux, via
+  `wsl.exe` on Windows); everything else in this app is OS-agnostic.
+- `scriptrunner/` — invokes `create.sh`/`delete.sh` and streams their output.
+- `deployconf/` — reads/writes a game's `games/APP_NAME/deploy.conf` without
+  disturbing its comments.
+- `preflight/` — checks doctl/gpg/ssh (and WSL, on Windows) are present.
+- `settings/` — persists the last-used app name and UI theme (never secrets)
+  outside the repo tree. The ops dir is never persisted — it's re-detected
+  from the running executable's location every startup.
+- `frontend/` — the UI (plain TypeScript + Vite, no framework).
