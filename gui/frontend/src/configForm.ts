@@ -1,6 +1,15 @@
 import { createDeployConf, loadDeployConf, saveDeployConf, type DeployConf } from "./api";
 import { refreshGames } from "./appPanel";
-import { state, notify } from "./state";
+import { state, notify, isGameRunning } from "./state";
+
+// True while either script is running for the selected game — deploy.conf
+// changing mid-run wouldn't affect that run (create.sh/delete.sh already
+// have their own copy of the values), but it would be misleading: the
+// operator could edit DB_NAME or GIT_REPO believing it applies to the run
+// in progress, when it only takes effect on the next one.
+function configLocked(): boolean {
+  return isGameRunning("create", state.appName) || isGameRunning("delete", state.appName);
+}
 
 const emptyConf: DeployConf = {
   appName: "",
@@ -124,6 +133,13 @@ export function createConfigForm(): { el: HTMLElement; render: () => void } {
   form.onsubmit = async (e) => {
     e.preventDefault();
     message.textContent = "";
+    // Belt-and-suspenders alongside the dataset.disabled/pointer-events
+    // block below: that's a CSS-level block, which stops clicks but not a
+    // keyboard Enter-to-submit from a focused field.
+    if (configLocked()) {
+      message.textContent = "Can't save while a deploy or teardown is running for this game.";
+      return;
+    }
     try {
       const conf = currentConf();
       if (state.deployConfFound) {
@@ -155,8 +171,13 @@ export function createConfigForm(): { el: HTMLElement; render: () => void } {
   let formForApp: string | null = null;
 
   function render() {
-    el.dataset.disabled = state.appName ? "false" : "true";
-    saveButton.textContent = state.deployConfFound ? "Save deploy.conf" : "Create deploy.conf";
+    const locked = configLocked();
+    el.dataset.disabled = state.appName && !locked ? "false" : "true";
+    saveButton.textContent = locked
+      ? "Deploy/teardown running…"
+      : state.deployConfFound
+        ? "Save deploy.conf"
+        : "Create deploy.conf";
     if (!state.loadingGame && state.appName !== formForApp) {
       formForApp = state.appName;
       cloneMessage.textContent = "";

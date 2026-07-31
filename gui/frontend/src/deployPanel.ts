@@ -364,7 +364,12 @@ export function createDeployPanel(): { el: HTMLElement; render: () => void } {
       void refreshRegions().then(refreshTiers);
     }
     const ready = Boolean(state.deployConfFound && state.opsDir && preflightPassed());
-    el.dataset.disabled = ready && !running ? "false" : "true";
+    // Dims the whole panel (including the log) when the form is shown but
+    // not fillable yet — e.g. preflight failing. Not applied while running:
+    // formParts are already hidden then (see above), and there's no reason
+    // to grey out the log/summary the operator is actively watching just
+    // because the (hidden) form beneath it isn't ready.
+    el.dataset.disabled = !running && !ready ? "true" : "false";
     deployButton.disabled = !ready || running || !formFilled();
 
     if (running) return; // the form (and this warning) is hidden anyway
