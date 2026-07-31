@@ -177,7 +177,10 @@ export function createTeardownPanel(): { el: HTMLElement; render: () => void } {
     if (!running) applyGPGVisibility();
 
     const ready = Boolean(state.opsDir && preflightPassed());
-    el.dataset.disabled = ready && !running ? "false" : "true";
+    // See deployPanel.ts's identical comment: don't dim the log/summary the
+    // operator is watching just because the (hidden) form beneath it isn't
+    // ready — only applies while the form itself is actually shown.
+    el.dataset.disabled = !running && !ready ? "true" : "false";
     const mismatch = gpgMismatch();
     teardownButton.disabled = !ready || running || mismatch;
     gpgMismatchWarning.textContent = mismatch ? "GPG_PASSPHRASE and its confirmation don't match." : "";
