@@ -6,21 +6,42 @@ name: Release GUI
 # vs platform_windows.go — only Windows shells through wsl.exe).
 #
 # To cut a release: run the "Cut Release" workflow from the Actions tab
-# (pick the branch, type a version) — it tags and pushes, which triggers
-# this workflow. Deliberately not automatic on every push to a branch: see
-# cut-release.yml and CLAUDE.md's Versioning section for why. A local
-# `git tag v1.2.3 && git push origin v1.2.3` still works identically.
+# (pick the branch, type a version) — it tags and pushes, then calls this
+# workflow directly (see the `workflow_call` trigger below). Deliberately
+# not automatic on every push to a branch: see cut-release.yml and
+# CLAUDE.md's Versioning section for why.
+#
+# Also still runs on a tag push directly (e.g. a local
+# `git tag v1.2.3 && git push origin v1.2.3`) — but note that pushing the
+# tag from *inside* a workflow using the default GITHUB_TOKEN, like
+# cut-release.yml briefly did, does NOT trigger this via the push event:
+# GitHub deliberately suppresses workflow runs triggered by the
+# GITHUB_TOKEN's own pushes, to stop workflows recursively triggering each
+# other. That's why cut-release.yml calls this workflow directly via
+# `workflow_call` instead of relying on the tag push to fire it — no
+# secret/PAT needed, since a direct call isn't a triggered event at all.
 
 on:
   push:
     tags:
       - "v*"
+  workflow_call:
+    inputs:
+      version:
+        description: "Tag being released (e.g. v1.2.3) — only set when called from cut-release.yml; a direct tag push infers it from the ref."
+        required: true
+        type: string
 
 permissions:
   contents: write
 
 jobs:
   build:
+    outputs:
+      # Same value written by all 3 matrix legs (last one to finish wins,
+      # per GitHub's documented behavior for matrix job outputs) — harmless
+      # here since it's identical every time.
+      version: ${{ steps.stage.outputs.version }}
     strategy:
       fail-fast: false
       matrix:
@@ -38,6 +59,15 @@ jobs:
     steps:
       - name: Check out repo
         uses: actions/checkout@v4
+        with:
+          # Explicit for the workflow_call path: without this, checkout
+          # defaults to the caller's ref, which happens to be the same
+          # commit right after cut-release.yml tags it, but would silently
+          # drift if this were ever called for a tag pushed earlier.
+          # inputs.version is unset (empty) on a direct tag push, in which
+          # case checkout's own default (the ref that triggered it) is
+          # already correct, so this is a no-op there.
+          ref: ${{ inputs.version && format('refs/tags/{0}', inputs.version) || '' }}
 
       - name: Set up Go
         uses: actions/setup-go@v5
@@ -88,10 +118,16 @@ jobs:
       # a normal double-clickable Mac app; GetOpsDir still finds create.sh
       # etc. two levels up from Contents/MacOS just fine (it walks up 6).
       - name: Stage release package
+        id: stage
         shell: bash
         run: |
           set -e
-          VERSION="${GITHUB_REF_NAME}"
+          # inputs.version is set when called from cut-release.yml; a direct
+          # tag push has no such input, so GITHUB_REF_NAME (the tag name) is
+          # the fallback.
+          VERSION="${{ inputs.version }}"
+          VERSION="${VERSION:-$GITHUB_REF_NAME}"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           STAGE="gameshell-deploy-${VERSION}-${{ matrix.platform }}"
           mkdir -p "$STAGE"
           if [ "${{ matrix.platform }}" = "macos" ]; then
@@ -138,5 +174,12 @@ jobs:
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
+          # Explicit rather than left to action-gh-release's own GITHUB_REF
+          # inference: under workflow_call that ref is the caller's branch,
+          # not the tag, and would create a release pointed at the wrong
+          # thing. inputs.version isn't visible in this job (only the
+          # "build" job above received it) — needs.build.outputs.version
+          # threads it through instead.
+          tag_name: ${{ needs.build.outputs.version }}
           files: dist/*
           generate_release_notes: true

@@ -1,11 +1,17 @@
 name: Cut Release
 
-# Manually creates and pushes a version tag, which is what actually triggers
-# a release — release.yml (the build/publish job) still only runs on a "v*"
-# tag push, unchanged. This workflow exists so cutting a release is a button
-# in the Actions tab (pick the branch/ref to tag, type a version) instead of
-# a local `git tag && git push`, without making every push to any branch
-# automatically ship a release. Nothing here runs on a schedule or on push.
+# Manually creates and pushes a version tag, then calls release.yml (the
+# build/publish job) directly to build and publish it. This workflow exists
+# so cutting a release is a button in the Actions tab (pick the branch/ref
+# to tag, type a version) instead of a local `git tag && git push`, without
+# making every push to any branch automatically ship a release. Nothing here
+# runs on a schedule or on push.
+#
+# release.yml is called directly (via `uses:`) rather than relied on to fire
+# from the tag push below: GitHub deliberately does not let a push made with
+# the default GITHUB_TOKEN (which the tag push below uses) trigger other
+# workflows' push events — otherwise workflows could trigger each other
+# recursively. A direct call sidesteps that entirely, and needs no PAT/secret.
 
 on:
   workflow_dispatch:
@@ -21,6 +27,8 @@ permissions:
 jobs:
   tag:
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
     steps:
       - name: Check out repo
         uses: actions/checkout@v4
@@ -56,4 +64,12 @@ jobs:
           VERSION="${{ steps.version.outputs.version }}"
           git tag -a "$VERSION" -m "$VERSION"
           git push origin "$VERSION"
-          echo "Pushed $VERSION at $(git rev-parse --short HEAD) — Release GUI will pick it up from here." >> "$GITHUB_STEP_SUMMARY"
+          echo "Pushed $VERSION at $(git rev-parse --short HEAD) — handing off to Release GUI." >> "$GITHUB_STEP_SUMMARY"
+
+  release:
+    needs: tag
+    uses: ./.github/workflows/release.yml
+    with:
+      version: ${{ needs.tag.outputs.version }}
+    permissions:
+      contents: write
