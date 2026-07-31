@@ -135,11 +135,24 @@ templated text file that ends up running on the droplet, add it to
 
 ## Versioning
 
-**Not centralized here on purpose.** Each consuming game repo tracks its own
-version (own `version_bump.sh`, own README version line) — this repo has no
-`version_bump.sh` and is not tagged in lockstep with any game. Don't add one
-without discussing it first; the whole point of the split was per-repo
-independence.
+**This repo's version tracks the scripts/GUI, not any game.** Each
+consuming game repo has its own version (own `version_bump.sh`, own README
+version line) — the point of the split was per-repo independence, so this
+repo is never tagged in lockstep with a game's release, and a game version
+bump is never a reason to cut one here. That's the "not centralized"
+part — it doesn't mean this repo goes unversioned, and it does have its own
+release process (below). Don't couple the two without discussing it first.
+
+**Cutting a release is manual, from the Actions tab, not automatic on
+push.** Run the "Cut Release" workflow (pick the branch/ref, type a
+version like `1.2.3`) — it tags and pushes, which triggers `release.yml` to
+build and publish the GUI for Windows/Linux/macOS. See
+[cut-release.yml](.github/workflows/cut-release.yml). Deliberately not
+triggered by pushes to any branch: this repo has no changelog/commit-message
+convention that could drive an automatic version bump, and a release on
+every merge would turn routine work into noise for anyone watching
+Releases. A local `git tag vX.Y.Z && git push origin vX.Y.Z` still works
+identically if you're not near a browser.
 
 ## Verify changes
 

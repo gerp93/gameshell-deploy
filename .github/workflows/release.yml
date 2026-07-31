@@ -5,7 +5,11 @@ name: Release GUI
 # pushed. The app itself is OS-agnostic (see gui/platform/platform_unix.go
 # vs platform_windows.go — only Windows shells through wsl.exe).
 #
-# To cut a release: git tag v1.2.3 && git push origin v1.2.3
+# To cut a release: run the "Cut Release" workflow from the Actions tab
+# (pick the branch, type a version) — it tags and pushes, which triggers
+# this workflow. Deliberately not automatic on every push to a branch: see
+# cut-release.yml and CLAUDE.md's Versioning section for why. A local
+# `git tag v1.2.3 && git push origin v1.2.3` still works identically.
 
 on:
   push:

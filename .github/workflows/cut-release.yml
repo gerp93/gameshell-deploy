@@ -1,0 +1,53 @@
+name: Cut Release
+
+# Manually creates and pushes a version tag, which is what actually triggers
+# a release — release.yml (the build/publish job) still only runs on a "v*"
+# tag push, unchanged. This workflow exists so cutting a release is a button
+# in the Actions tab (pick the branch/ref to tag, type a version) instead of
+# a local `git tag && git push`, without making every push to any branch
+# automatically ship a release. Nothing here runs on a schedule or on push.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release, e.g. "1.2.3" or "v1.2.3"'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  tag:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate and normalize version
+        id: version
+        run: |
+          set -e
+          RAW="${{ inputs.version }}"
+          # Accept with or without a leading v; the tag itself always has one.
+          VERSION="v${RAW#v}"
+          if ! [[ "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Invalid version: '$RAW' — expected X.Y.Z or vX.Y.Z (e.g. 1.2.3)." >&2
+            exit 1
+          fi
+          if git rev-parse "$VERSION" >/dev/null 2>&1; then
+            echo "Tag $VERSION already exists." >&2
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Create and push tag
+        run: |
+          set -e
+          VERSION="${{ steps.version.outputs.version }}"
+          git tag -a "$VERSION" -m "$VERSION"
+          git push origin "$VERSION"
+          echo "Pushed $VERSION at $(git rev-parse --short HEAD) — Release GUI will pick it up from here." >> "$GITHUB_STEP_SUMMARY"
