@@ -1,17 +1,18 @@
 name: Cut Release
 
-# Manually creates and pushes a version tag, then calls release.yml (the
-# build/publish job) directly to build and publish it. This workflow exists
-# so cutting a release is a button in the Actions tab (pick the branch/ref
-# to tag, type a version) instead of a local `git tag && git push`, without
-# making every push to any branch automatically ship a release. Nothing here
-# runs on a schedule or on push.
+# Manually creates and pushes a version tag, then calls KVG_Standards'
+# release-go-gui.yml (build/publish job) directly to build and publish it.
+# This workflow exists so cutting a release is a button in the Actions tab
+# (pick the branch/ref to tag, type a version) instead of a local
+# `git tag && git push`, without making every push to any branch
+# automatically ship a release. Nothing here runs on a schedule or on push.
 #
-# release.yml is called directly (via `uses:`) rather than relied on to fire
-# from the tag push below: GitHub deliberately does not let a push made with
-# the default GITHUB_TOKEN (which the tag push below uses) trigger other
-# workflows' push events — otherwise workflows could trigger each other
-# recursively. A direct call sidesteps that entirely, and needs no PAT/secret.
+# The build workflow is called directly (via `uses:`) rather than relied on
+# to fire from the tag push below: GitHub deliberately does not let a push
+# made with the default GITHUB_TOKEN (which the tag push below uses)
+# trigger other workflows' push events — otherwise workflows could trigger
+# each other recursively. A direct call sidesteps that entirely, and needs
+# no PAT/secret.
 
 on:
   workflow_dispatch:
@@ -64,12 +65,15 @@ jobs:
           VERSION="${{ steps.version.outputs.version }}"
           git tag -a "$VERSION" -m "$VERSION"
           git push origin "$VERSION"
-          echo "Pushed $VERSION at $(git rev-parse --short HEAD) — handing off to Release GUI." >> "$GITHUB_STEP_SUMMARY"
+          echo "Pushed $VERSION at $(git rev-parse --short HEAD) — handing off to release-go-gui.yml." >> "$GITHUB_STEP_SUMMARY"
 
   release:
     needs: tag
-    uses: ./.github/workflows/release.yml
+    uses: gerp93/KVG_Standards/.github/workflows/release-go-gui.yml@main
     with:
       version: ${{ needs.tag.outputs.version }}
+      app_name: gameshell-deploy-gui
+      gui_dir: gui
+      extra_stage_paths: "create.sh delete.sh README.md CLAUDE.md templates deploy.conf.template games"
     permissions:
       contents: write
