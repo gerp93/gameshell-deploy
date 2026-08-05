@@ -1,13 +1,13 @@
-# Fires a release on every push to main — see gerp93/KVG_Standards'
-# templates/auto-release.yml for the full rationale. Coexists with
-# cut-release.yml (manual, explicit version); this is the default,
-# always-on path.
+# Fires a release on every push to this repo's default branch — see
+# gerp93/KVG_Standards' templates/auto-release.yml for the full rationale.
+# Coexists with cut-release.yml (manual, explicit version); this is the
+# default, always-on path.
 
 name: Auto Release
 
 on:
   push:
-    branches: [main]
+    branches: [migration/control-plane-scripts]
 
 permissions:
   contents: write
@@ -28,7 +28,7 @@ jobs:
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           default_bump: patch
-          release_branches: main
+          release_branches: migration/control-plane-scripts
 
   release:
     needs: version
