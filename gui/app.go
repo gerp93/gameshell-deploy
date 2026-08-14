@@ -11,11 +11,21 @@ import (
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 
+	"github.com/gerp93/KVG_Standards/packages/go/kvgupdate"
+
 	"gameshell-deploy-gui/deployconf"
 	"gameshell-deploy-gui/platform"
 	"gameshell-deploy-gui/preflight"
 	"gameshell-deploy-gui/scriptrunner"
 	"gameshell-deploy-gui/settings"
+)
+
+// updateRepo/updateAppName identify this app to kvgupdate — see
+// CheckForUpdate/ApplyUpdate below and appVersion's doc comment in main.go
+// for the current limitation on knowing our own running version.
+const (
+	updateRepo    = "gerp93/gameshell-deploy"
+	updateAppName = "gameshell-deploy-gui"
 )
 
 // App is the Wails-bound backend. Its exported methods are callable from
@@ -348,4 +358,49 @@ func (a *App) RunDelete(req scriptrunner.DeleteRequest) {
 // during CLI use.
 func (a *App) CancelRun(appName string) bool {
 	return scriptrunner.Cancel(appName)
+}
+
+// --- self-update -----------------------------------------------------------
+//
+// See gerp93/KVG_Standards' packages/go/kvgupdate README. As with that
+// package generally, the download-extract-replace-relaunch path here has
+// not been exercised end-to-end against a real gameshell-deploy release —
+// verify it against an actual tagged build before relying on it silently.
+
+// UpdateInfo reports whether a newer release than the running build is
+// available.
+type UpdateInfo struct {
+	Available bool   `json:"available"`
+	Version   string `json:"version"`
+}
+
+// CheckForUpdate polls GitHub Releases for a newer gameshell-deploy-gui
+// build than appVersion. Available is false (no error) when already up to
+// date — which, until release-go-gui.yml stamps appVersion at build time
+// (see main.go), is always the case for a build produced by that workflow.
+func (a *App) CheckForUpdate() (UpdateInfo, error) {
+	info, err := kvgupdate.CheckForUpdate(updateRepo, updateAppName, appVersion)
+	if err != nil || info == nil {
+		return UpdateInfo{}, err
+	}
+	return UpdateInfo{Available: true, Version: info.Version}, nil
+}
+
+// ApplyUpdate re-checks for an update, downloads and extracts it, then
+// replaces the running executable and relaunches. Does not return on
+// success; the frontend should treat a resolved promise here as "something
+// went wrong" (a real update never comes back to report success).
+func (a *App) ApplyUpdate() error {
+	info, err := kvgupdate.CheckForUpdate(updateRepo, updateAppName, appVersion)
+	if err != nil {
+		return err
+	}
+	if info == nil {
+		return fmt.Errorf("no update available")
+	}
+	stagedDir, err := kvgupdate.DownloadAndExtract(info, updateAppName)
+	if err != nil {
+		return err
+	}
+	return kvgupdate.ApplyUpdateAndRestart(stagedDir, updateAppName) // does not return on success
 }

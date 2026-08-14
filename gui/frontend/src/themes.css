@@ -5,11 +5,12 @@
  * override).
  *
  * "Default" is the app's own light/dark palette, driven by the OS
- * preference. Every other theme is an explicit `data-theme="slug"` override
- * — transcribed from https://github.com/gerp93/VisualAssault
- * (themes/THEMES.md) — that applies regardless of OS light/dark preference,
- * since `:root[data-theme]` has higher specificity than a plain `:root`
- * inside @media.
+ * preference — not from VisualAssault, never touched by the re-vendor
+ * script below. Every other theme is an explicit `data-theme="slug"`
+ * override sourced from https://github.com/gerp93/VisualAssault
+ * (packages/css/themes.css) — that applies regardless of OS light/dark
+ * preference, since `:root[data-theme]` has higher specificity than a
+ * plain `:root` inside @media.
  *
  * Each theme defines the same token set, mapped from VisualAssault's raw
  * palette fields:
@@ -26,6 +27,13 @@
  * component CSS can composite translucent tints — e.g. the status pills —
  * with rgba(var(--ok-rgb), 0.16) instead of every theme needing its own
  * hand-picked tint pair.
+ *
+ * The block below the marker comment is vendored from VisualAssault
+ * @ v0.2.0 (verified byte-for-byte equivalent, field-mapping aside, against
+ * that tag's packages/css/themes.css) — re-run
+ * `node scripts/update-visual-assault-css.mjs <tag>` (from gui/) against a
+ * newer tag to bump it, per gerp93/KVG_Standards' themes-versioning.md.
+ * Do not hand-edit anything below the marker.
  */
 
 :root {
@@ -65,6 +73,13 @@
     --fail-rgb: 239, 103, 103;
   }
 }
+
+/* --- VisualAssault vendored themes below --- */
+/* Vendored verbatim (after token remapping — see this file's top comment)
+   from https://github.com/gerp93/VisualAssault packages/css/themes.css @ v0.2.0.
+   Do not hand-edit these blocks; re-run scripts/update-visual-assault-css.mjs
+   against a newer VisualAssault tag instead, then commit the diff as its own
+   change so a version bump is reviewable on its own. */
 
 :root[data-theme="blue-oval"] {
   --bg: rgb(13, 71, 161);

@@ -1,4 +1,4 @@
-import { openOpsDir } from "./api";
+import { openOpsDir, checkForUpdate, applyUpdate } from "./api";
 import { createPreflightPanel } from "./preflightPanel";
 import { createAppPanel } from "./appPanel";
 import { createGameHeader } from "./gameHeader";
@@ -28,7 +28,41 @@ openFolderButton.className = "secondary";
 openFolderButton.textContent = "Open repo folder";
 openFolderButton.disabled = true;
 openFolderButton.onclick = () => void openOpsDir(state.opsDir);
-headerActions.append(themeSwitcher, openFolderButton);
+
+// See app.go's CheckForUpdate/ApplyUpdate — not yet verified end-to-end
+// against a real tagged release, and always reports "up to date" until
+// release-go-gui.yml is updated to stamp a version into the build (see
+// main.go's appVersion doc comment). Still wired in now so the frontend
+// half doesn't have to be revisited once that's fixed.
+const updateButton = document.createElement("button");
+updateButton.type = "button";
+updateButton.className = "secondary";
+updateButton.textContent = "Check for Updates";
+updateButton.onclick = () => {
+  void (async () => {
+    updateButton.disabled = true;
+    const previousLabel = updateButton.textContent;
+    try {
+      const result = await checkForUpdate();
+      if (!result.available) {
+        updateButton.textContent = "Up to date";
+        setTimeout(() => (updateButton.textContent = previousLabel), 2000);
+        return;
+      }
+      if (confirm(`Version ${result.version} is available. Download and install it now?`)) {
+        updateButton.textContent = "Updating…";
+        await applyUpdate();
+      }
+    } catch (err) {
+      alert(`Update check failed: ${err}`);
+      updateButton.textContent = previousLabel;
+    } finally {
+      updateButton.disabled = false;
+    }
+  })();
+};
+
+headerActions.append(themeSwitcher, openFolderButton, updateButton);
 header.appendChild(headerActions);
 
 const preflight = createPreflightPanel();

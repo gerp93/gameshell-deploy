@@ -143,16 +143,20 @@ bump is never a reason to cut one here. That's the "not centralized"
 part — it doesn't mean this repo goes unversioned, and it does have its own
 release process (below). Don't couple the two without discussing it first.
 
-**Cutting a release is manual, from the Actions tab, not automatic on
-push.** Run the "Cut Release" workflow (pick the branch/ref, type a
-version like `1.2.3`) — it tags and pushes, which triggers `release.yml` to
-build and publish the GUI for Windows/Linux/macOS. See
-[cut-release.yml](.github/workflows/cut-release.yml). Deliberately not
-triggered by pushes to any branch: this repo has no changelog/commit-message
-convention that could drive an automatic version bump, and a release on
-every merge would turn routine work into noise for anyone watching
-Releases. A local `git tag vX.Y.Z && git push origin vX.Y.Z` still works
-identically if you're not near a browser.
+**Releases follow the [gerp93/KVG_Standards](https://github.com/gerp93/KVG_Standards)
+desktop-GUI convention: both an automatic and a manual path, not one or the
+other.** [`auto-release.yml`](.github/workflows/auto-release.yml) bumps a
+patch version and ships a release on every push to the default branch —
+this is the default, always-on path, per KVG_Standards. If you need a
+deliberately chosen version instead, run the "Cut Release" workflow from
+the Actions tab (pick the branch/ref, type a version like `1.2.3`) — see
+[cut-release.yml](.github/workflows/cut-release.yml). Both call
+KVG_Standards' `release-go-gui.yml` reusable workflow to actually build and
+publish the GUI for Windows/Linux/macOS. Since `auto-release.yml` bumps on
+*every* push regardless of what changed, a change with no real code diff
+(e.g. picking up an updated KVG_Standards workflow) should add a dated
+entry to [VERSION_BUMP.md](VERSION_BUMP.md) instead of an empty commit, so
+the triggering push has a real, reviewable diff.
 
 ## Verify changes
 

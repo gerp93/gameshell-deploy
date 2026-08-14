@@ -25,9 +25,13 @@ the archive for your OS, extract it, and run `gameshell-deploy-gui`
 files in that archive alongside it: `create.sh`, `templates/`,
 `deploy.conf.template`, `games/`. No Go/Node/Wails install needed to run it, only to build it
 yourself (see below). New releases are built by
-`.github/workflows/release.yml` whenever a `vX.Y.Z` tag is pushed. On
-Linux/macOS you'll likely need to mark the binary executable first:
-`chmod +x gameshell-deploy-gui`.
+[`../.github/workflows/auto-release.yml`](../.github/workflows/auto-release.yml)
+on every push to the default branch, or on demand via
+[`../.github/workflows/cut-release.yml`](../.github/workflows/cut-release.yml)
+— both call KVG_Standards'
+[`release-go-gui.yml`](https://github.com/gerp93/KVG_Standards/blob/main/.github/workflows/release-go-gui.yml)
+to do the actual build. On Linux/macOS you'll likely need to mark the
+binary executable first: `chmod +x gameshell-deploy-gui`.
 
 ## Prerequisites
 
@@ -54,6 +58,35 @@ wails build
 ```
 
 Produces a native binary under `gui/build/bin/`.
+
+## Theming
+
+`frontend/src/themes.css` is vendored from
+[VisualAssault](https://github.com/gerp93/VisualAssault)'s
+`packages/css/themes.css` at a pinned tag (see that file's header comment
+for the current one and the token-name mapping). To bump it after a new
+VisualAssault tag:
+
+```bash
+cd gui
+node scripts/update-visual-assault-css.mjs v0.X.Y
+```
+
+This only regenerates the vendored block below the marker comment in
+`themes.css`; the "Default" light/dark palette above it is this app's own
+and is never touched. See KVG_Standards'
+[themes-versioning.md](https://github.com/gerp93/KVG_Standards/blob/main/themes-versioning.md).
+
+## Self-update
+
+Wired via KVG_Standards'
+[`packages/go/kvgupdate`](https://github.com/gerp93/KVG_Standards/tree/main/packages/go/kvgupdate)
+(`App.CheckForUpdate`/`App.ApplyUpdate` in `app.go`, a "Check for Updates"
+button in the header). Not yet verified end-to-end against a real tagged
+release, and the running build currently has no way to know its own
+version (see `appVersion`'s doc comment in `main.go`) — until
+`release-go-gui.yml` is updated to stamp a version into the binary at
+build time, `CheckForUpdate` will always report "up to date."
 
 ## Layout
 
