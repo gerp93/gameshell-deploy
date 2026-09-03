@@ -1,4 +1,4 @@
-import { runDelete } from "./api";
+import { runDelete, loadSecrets, loadSettings, saveSecrets } from "./api";
 import { createLogPane } from "./logPane";
 import { refreshStatus, scheduleStatusReconcile } from "./appPanel";
 import { state, preflightPassed, isDeployed, isGameRunning, getGameRun, clearGameRun, notify } from "./state";
@@ -49,6 +49,22 @@ export function createTeardownPanel(): { el: HTMLElement; render: () => void } {
   const gpgMismatchWarning = document.createElement("div");
   gpgMismatchWarning.className = "status-line";
 
+  let gpgKeyringTried = false;
+  async function fillGPGFromKeyring() {
+    if (gpgKeyringTried || gpgPassphraseInput.value) return;
+    gpgKeyringTried = true;
+    try {
+      const bundle = await loadSecrets([]);
+      if (bundle.gpgPassphrase && !gpgPassphraseInput.value) {
+        gpgPassphraseInput.value = bundle.gpgPassphrase;
+        gpgConfirmInput.value = bundle.gpgPassphrase;
+        render();
+      }
+    } catch {
+      // Keyring unavailable — type the passphrase this run.
+    }
+  }
+
   const teardownButton = document.createElement("button");
   teardownButton.textContent = "Teardown";
   teardownButton.style.marginTop = "0.5rem";
@@ -96,8 +112,23 @@ export function createTeardownPanel(): { el: HTMLElement; render: () => void } {
     run.running = true;
     run.params = [["Back up database first", backup === "yes" ? "yes" : "no"]];
     teardownButton.disabled = true;
-    gpgPassphraseInput.value = "";
-    gpgConfirmInput.value = "";
+    const s = await loadSettings();
+    if (s.rememberSecrets && gpgPassphrase) {
+      try {
+        await saveSecrets({
+          sqlUser: "",
+          sqlPassword: "",
+          gpgPassphrase,
+          extraEnv: {},
+        });
+      } catch {
+        // Don't block teardown if the keychain write fails.
+      }
+    }
+    if (!s.rememberSecrets) {
+      gpgPassphraseInput.value = "";
+      gpgConfirmInput.value = "";
+    }
     notify();
 
     await runDelete({
@@ -179,7 +210,10 @@ export function createTeardownPanel(): { el: HTMLElement; render: () => void } {
     logPane.showGame(state.appName);
     runSummary.render(state.appName, { running: "Tearing down", done: "Torn down" });
     for (const part of formParts) part.style.display = running ? "none" : "";
-    if (!running) applyGPGVisibility();
+    if (!running) {
+      applyGPGVisibility();
+      void fillGPGFromKeyring();
+    }
 
     const ready = Boolean(state.opsDir && preflightPassed());
     // See deployPanel.ts's identical comment: don't dim the log/summary the

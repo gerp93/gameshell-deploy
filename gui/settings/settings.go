@@ -1,5 +1,6 @@
-// Package settings persists the operator's last selected app name and UI
-// theme to a config file outside the repo tree — never any secrets.
+// Package settings persists the operator's last selected app name, UI
+// theme, and the "remember secrets" preference to a config file outside
+// the repo tree — never any secrets.
 package settings
 
 import (
@@ -14,6 +15,9 @@ type Settings struct {
 	// Theme is a data-theme slug (see frontend/src/themes.css), or "" for
 	// the default light/dark palette that follows the OS preference.
 	Theme string `json:"theme"`
+	// RememberSecrets is the Deploy/Teardown "save on this computer" checkbox.
+	// The secrets themselves live in the OS keyring, not this file.
+	RememberSecrets bool `json:"rememberSecrets"`
 }
 
 func path() (string, error) {

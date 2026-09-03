@@ -3,8 +3,13 @@ import {
   listAvailableRegions,
   listAvailableTiers,
   listSSHKeys,
+  loadSecrets,
+  loadSettings,
   openBackupsFolder,
   runCreate,
+  saveSecrets,
+  forgetSecrets,
+  setRememberSecrets,
   type RegionOption,
   type TierOption,
 } from "./api";
@@ -100,8 +105,9 @@ export function createDeployPanel(): { el: HTMLElement; render: () => void } {
   gpgPassphraseWrap.append(gpgPassphraseLabel, gpgPassphraseInput);
 
   // Extra secrets named in deploy.conf EXTRA_ENV_VARS — names are not
-  // secret and come from config; values are typed here at deploy time
-  // (never persisted), same as DEPLOY_SQL_PASSWORD.
+  // secret and come from config; values are typed here at deploy time.
+  // With "Remember on this computer" they live in the OS keyring, not
+  // deploy.conf / settings.json.
   const extraEnvWrap = document.createElement("div");
   extraEnvWrap.className = "field-grid";
   extraEnvWrap.style.display = "none";
@@ -135,10 +141,72 @@ export function createDeployPanel(): { el: HTMLElement; render: () => void } {
       extraEnvWrap.appendChild(wrap);
       extraEnvInputs.set(name, input);
     }
+    void fillSecrets();
+  }
+
+  async function fillSecrets() {
+    try {
+      const bundle = await loadSecrets(extraEnvNames());
+      if (!sqlUserInput.value) sqlUserInput.value = bundle.sqlUser ?? "";
+      if (!sqlPasswordInput.value) sqlPasswordInput.value = bundle.sqlPassword ?? "";
+      if (!gpgPassphraseInput.value) gpgPassphraseInput.value = bundle.gpgPassphrase ?? "";
+      const extras = bundle.extraEnv ?? {};
+      for (const [name, input] of extraEnvInputs) {
+        if (!input.value && extras[name]) input.value = extras[name];
+      }
+      void render();
+    } catch {
+      // Shouldn't happen — LoadSecrets falls back to env if the keyring is
+      // unavailable. Leave fields empty so the operator can still type.
+    }
   }
 
   const backupWarning = document.createElement("div");
   backupWarning.className = "status-line";
+
+  const rememberWrap = document.createElement("div");
+  rememberWrap.className = "field";
+  const rememberLabel = document.createElement("label");
+  rememberLabel.className = "extra-env-check";
+  const rememberCheck = document.createElement("input");
+  rememberCheck.type = "checkbox";
+  rememberLabel.append(rememberCheck, document.createTextNode(" Remember secrets on this computer"));
+  const rememberHint = document.createElement("p");
+  rememberHint.className = "hint";
+  rememberHint.textContent =
+    "Empty fields are filled from your environment (DEPLOY_SQL_USER, extra API keys, GPG_PASSPHRASE) if set — including WSL on Windows. Check the box to also save them in the OS keychain, not in the repo or deploy.conf.";
+  const rememberStatus = document.createElement("div");
+  rememberStatus.className = "status-line";
+  const forgetButton = document.createElement("button");
+  forgetButton.type = "button";
+  forgetButton.className = "secondary";
+  forgetButton.textContent = "Forget saved secrets";
+  rememberWrap.append(rememberLabel, rememberHint, rememberStatus, forgetButton);
+
+  void loadSettings().then((s) => {
+    rememberCheck.checked = Boolean(s.rememberSecrets);
+  });
+  rememberCheck.onchange = () => {
+    void setRememberSecrets(rememberCheck.checked).catch((err) => {
+      rememberStatus.textContent = `Couldn't save preference: ${err instanceof Error ? err.message : String(err)}`;
+    });
+  };
+  forgetButton.onclick = async () => {
+    rememberStatus.textContent = "";
+    try {
+      await forgetSecrets(extraEnvNames());
+      sqlUserInput.value = "";
+      sqlPasswordInput.value = "";
+      gpgPassphraseInput.value = "";
+      for (const input of extraEnvInputs.values()) {
+        input.value = "";
+      }
+      rememberStatus.textContent = "Saved secrets removed from the OS keychain.";
+      void render();
+    } catch (err) {
+      rememberStatus.textContent = `Couldn't forget secrets: ${err instanceof Error ? err.message : String(err)}`;
+    }
+  };
 
   const openBackupsButton = document.createElement("button");
   openBackupsButton.type = "button";
@@ -206,6 +274,20 @@ export function createDeployPanel(): { el: HTMLElement; render: () => void } {
       extraEnv[name] = input.value;
     }
 
+    if (rememberCheck.checked) {
+      try {
+        await saveSecrets({
+          sqlUser,
+          sqlPassword,
+          gpgPassphrase,
+          extraEnv,
+        });
+        rememberStatus.textContent = "";
+      } catch (err) {
+        rememberStatus.textContent = `Couldn't save to the OS keychain: ${err instanceof Error ? err.message : String(err)}`;
+      }
+    }
+
     // Mark this game as running immediately (before the first log line
     // arrives) so the button/tab reflect it right away, and record the
     // non-secret settings it's running with for the progress view.
@@ -219,13 +301,15 @@ export function createDeployPanel(): { el: HTMLElement; render: () => void } {
     ];
     deployButton.disabled = true;
 
-    // Clear secret fields from memory immediately once the run has been
-    // handed off — they're never persisted to disk.
-    sqlUserInput.value = "";
-    sqlPasswordInput.value = "";
-    gpgPassphraseInput.value = "";
-    for (const input of extraEnvInputs.values()) {
-      input.value = "";
+    // Drop secrets from the DOM unless they were just written to the OS
+    // keychain — then they stay filled so a retry doesn't require retyping.
+    if (!rememberCheck.checked) {
+      sqlUserInput.value = "";
+      sqlPasswordInput.value = "";
+      gpgPassphraseInput.value = "";
+      for (const input of extraEnvInputs.values()) {
+        input.value = "";
+      }
     }
     notify();
 
@@ -256,9 +340,20 @@ export function createDeployPanel(): { el: HTMLElement; render: () => void } {
   // Everything the operator fills in — hidden while a run is in flight, so
   // switching back to a deploying game shows its progress rather than an
   // inert form implying it hasn't started.
-  const formParts = [sshKeyWrap, regionWrap, tierWrap, credsGrid, extraEnvWrap, backupWarning, actionRow];
+  const formParts = [sshKeyWrap, regionWrap, tierWrap, credsGrid, extraEnvWrap, rememberWrap, backupWarning, actionRow];
 
-  el.append(sshKeyWrap, regionWrap, tierWrap, credsGrid, extraEnvWrap, backupWarning, actionRow, runSummary.el, logPane.el);
+  el.append(
+    sshKeyWrap,
+    regionWrap,
+    tierWrap,
+    credsGrid,
+    extraEnvWrap,
+    rememberWrap,
+    backupWarning,
+    actionRow,
+    runSummary.el,
+    logPane.el,
+  );
 
   async function refreshKeys() {
     sshKeySelect.innerHTML = "";

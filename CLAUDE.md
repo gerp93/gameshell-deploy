@@ -60,7 +60,10 @@ encrypts database backups at rest.
   create time and written into the rendered app spec (not through `sed`,
   because values can contain the delimiters the SQL substitutions use).
   Don't hardcode a game's API key name into `create.sh`/`templates/spec.yaml`
-  — that's what `EXTRA_ENV_VARS` is for.
+  — that's what `EXTRA_ENV_VARS` is for. The GUI may optionally remember
+  those values in the OS keyring (`gui/secrets`) when the operator checks
+  "Remember secrets on this computer"; they still never land in
+  `deploy.conf` or `settings.json`.
 - **`GPG_PASSPHRASE`** (optional operator secret): backups are symmetric
   `gpg -c`/`gpg -d`, which normally prompts interactively via pinentry — fine
   for CLI use, but the GUI has no TTY for that. When set, `create.sh`/

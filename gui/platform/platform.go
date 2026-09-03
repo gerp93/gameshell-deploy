@@ -56,3 +56,30 @@ func OpenFolder(path string) error {
 func OpenURL(rawURL string) error {
 	return openURL(rawURL)
 }
+
+// LookupEnv returns the value of name from the process environment. On
+// Windows, if it isn't set on the host, it also checks the default WSL
+// distro (login shell), so exports in ~/.bashrc match CLI use of create.sh.
+// Names that aren't env-var identifiers return "".
+func LookupEnv(name string) string {
+	if !validEnvName(name) {
+		return ""
+	}
+	return lookupEnv(name)
+}
+
+func validEnvName(name string) bool {
+	if name == "" {
+		return false
+	}
+	for i, c := range name {
+		if c == '_' || (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') {
+			continue
+		}
+		if i > 0 && c >= '0' && c <= '9' {
+			continue
+		}
+		return false
+	}
+	return true
+}
