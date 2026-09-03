@@ -98,6 +98,43 @@ export function createDeployPanel(): { el: HTMLElement; render: () => void } {
   gpgPassphraseInput.type = "password";
   gpgPassphraseWrap.append(gpgPassphraseLabel, gpgPassphraseInput);
 
+  // Extra secrets named in deploy.conf EXTRA_ENV_VARS — names are not
+  // secret and come from config; values are typed here at deploy time
+  // (never persisted), same as DEPLOY_SQL_PASSWORD.
+  const extraEnvWrap = document.createElement("div");
+  extraEnvWrap.className = "field-grid";
+  extraEnvWrap.style.display = "none";
+  const extraEnvInputs = new Map<string, HTMLInputElement>();
+  let extraEnvFor = "";
+
+  function extraEnvNames(): string[] {
+    const raw = state.deployConf?.extraEnvVars?.trim() ?? "";
+    if (!raw) return [];
+    return raw.split(/\s+/).filter(Boolean);
+  }
+
+  function rebuildExtraEnvFields() {
+    const names = extraEnvNames();
+    const key = `${state.appName}\0${names.join(" ")}`;
+    if (key === extraEnvFor) return;
+    extraEnvFor = key;
+    extraEnvWrap.innerHTML = "";
+    extraEnvInputs.clear();
+    extraEnvWrap.style.display = names.length ? "" : "none";
+    for (const name of names) {
+      const wrap = document.createElement("div");
+      wrap.className = "field";
+      const label = document.createElement("label");
+      label.textContent = name;
+      const input = document.createElement("input");
+      input.type = "password";
+      input.oninput = () => void render();
+      wrap.append(label, input);
+      extraEnvWrap.appendChild(wrap);
+      extraEnvInputs.set(name, input);
+    }
+  }
+
   const backupWarning = document.createElement("div");
   backupWarning.className = "status-line";
 
@@ -162,6 +199,10 @@ export function createDeployPanel(): { el: HTMLElement; render: () => void } {
     const sqlUser = sqlUserInput.value;
     const sqlPassword = sqlPasswordInput.value;
     const gpgPassphrase = gpgPassphraseInput.value;
+    const extraEnv: Record<string, string> = {};
+    for (const [name, input] of extraEnvInputs) {
+      extraEnv[name] = input.value;
+    }
 
     // Mark this game as running immediately (before the first log line
     // arrives) so the button/tab reflect it right away, and record the
@@ -181,6 +222,9 @@ export function createDeployPanel(): { el: HTMLElement; render: () => void } {
     sqlUserInput.value = "";
     sqlPasswordInput.value = "";
     gpgPassphraseInput.value = "";
+    for (const input of extraEnvInputs.values()) {
+      input.value = "";
+    }
     notify();
 
     await runCreate({
@@ -193,6 +237,7 @@ export function createDeployPanel(): { el: HTMLElement; render: () => void } {
       sqlUser,
       sqlPassword,
       gpgPassphrase,
+      extraEnv,
     });
   };
 
@@ -209,9 +254,9 @@ export function createDeployPanel(): { el: HTMLElement; render: () => void } {
   // Everything the operator fills in — hidden while a run is in flight, so
   // switching back to a deploying game shows its progress rather than an
   // inert form implying it hasn't started.
-  const formParts = [sshKeyWrap, regionWrap, tierWrap, credsGrid, backupWarning, actionRow];
+  const formParts = [sshKeyWrap, regionWrap, tierWrap, credsGrid, extraEnvWrap, backupWarning, actionRow];
 
-  el.append(sshKeyWrap, regionWrap, tierWrap, credsGrid, backupWarning, actionRow, runSummary.el, logPane.el);
+  el.append(sshKeyWrap, regionWrap, tierWrap, credsGrid, extraEnvWrap, backupWarning, actionRow, runSummary.el, logPane.el);
 
   async function refreshKeys() {
     sshKeySelect.innerHTML = "";
@@ -340,7 +385,13 @@ export function createDeployPanel(): { el: HTMLElement; render: () => void } {
 
   function formFilled(): boolean {
     const tierChosen = tierInputs.some((i) => i.checked);
-    return tierChosen && sqlUserInput.value.trim() !== "" && sqlPasswordInput.value.trim() !== "";
+    if (!tierChosen || sqlUserInput.value.trim() === "" || sqlPasswordInput.value.trim() === "") {
+      return false;
+    }
+    for (const input of extraEnvInputs.values()) {
+      if (input.value.trim() === "") return false;
+    }
+    return true;
   }
 
   async function render() {
@@ -356,6 +407,7 @@ export function createDeployPanel(): { el: HTMLElement; render: () => void } {
 
     logPane.showGame(state.appName);
     runSummary.render(state.appName, { running: "Deploying", done: "Deployed" });
+    rebuildExtraEnvFields();
     for (const part of formParts) part.style.display = running ? "none" : "";
 
     // Skip the availability checks entirely while a run is in flight — the

@@ -22,6 +22,7 @@ const emptyConf: DeployConf = {
   dropletRegion: "",
   dropletImage: "",
   dropletSize: "",
+  extraEnvVars: "",
 };
 
 const fieldDefs: Array<{ key: keyof DeployConf; label: string; required: boolean }> = [
@@ -35,6 +36,7 @@ const fieldDefs: Array<{ key: keyof DeployConf; label: string; required: boolean
   { key: "dropletRegion", label: "DROPLET_REGION (optional)", required: false },
   { key: "dropletImage", label: "DROPLET_IMAGE (optional)", required: false },
   { key: "dropletSize", label: "DROPLET_SIZE (optional)", required: false },
+  { key: "extraEnvVars", label: "EXTRA_ENV_VARS (optional, space-separated names)", required: false },
 ];
 
 export function createConfigForm(): { el: HTMLElement; render: () => void } {

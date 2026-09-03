@@ -21,6 +21,7 @@ export interface DeployConf {
   dropletRegion: string;
   dropletImage: string;
   dropletSize: string;
+  extraEnvVars: string;
 }
 
 export interface DeployConfResult {
@@ -86,6 +87,7 @@ export interface CreateRequest {
   sqlUser: string;
   sqlPassword: string;
   gpgPassphrase: string;
+  extraEnv: Record<string, string>;
 }
 
 export interface DeleteRequest {

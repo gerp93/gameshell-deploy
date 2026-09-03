@@ -13,7 +13,8 @@ process lives here; nothing game-specific lives in the application repos.
 - **Process** (here): `create.sh`, `delete.sh`, and the `templates/`
   (`spec.yaml`, `setup.sh`). No game names or game-specific values.
 - **Config** (here): `games/{APP_NAME}/deploy.conf` — app name, env prefix, DB
-  name, port, git repo. See [deploy.conf.template](deploy.conf.template).
+  name, port, git repo, optional extra env var names. See
+  [deploy.conf.template](deploy.conf.template).
 - **Data** (here): `games/{APP_NAME}/backups/` directory of GPG-encrypted
   database dumps (`*.sql.gpg`). Backups are optional; if none exist, a fresh
   database is created and the app initializes the schema on startup.
@@ -84,6 +85,22 @@ deployment in sync. The app reads its database settings through
 `database.SetEnvVarPrefix(ENV_VAR_PREFIX)` (in the game's `main.go`), and `create.sh`
 injects DO app env vars with matching keys — `${ENV_VAR_PREFIX}_SQL_HOST`,
 `_SQL_USER`, `_SQL_PASSWORD`, `_SQL_DATABASE`. Change it in one place.
+
+Games that need additional secrets (API keys, etc.) list the env var **names**
+in `deploy.conf`'s `EXTRA_ENV_VARS` (space-separated). Values stay in the
+operator's environment and are copied onto the DO app at create time, same as
+`DEPLOY_SQL_*`. Keys are injected as-is — if the game uses `ENV_VAR_PREFIX`,
+include it in the name:
+
+```bash
+# in games/my-game/deploy.conf (names only, safe to commit)
+EXTRA_ENV_VARS=MY_GAME_OPENAI_API_KEY MY_GAME_OTHER_SECRET
+
+# in the operator's environment (values, never a file)
+export MY_GAME_OPENAI_API_KEY=...
+export MY_GAME_OTHER_SECRET=...
+./create.sh my-game
+```
 
 ## Notes
 
