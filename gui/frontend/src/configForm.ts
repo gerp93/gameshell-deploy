@@ -1,4 +1,5 @@
 import { createDeployConf, loadDeployConf, saveDeployConf, type DeployConf } from "./api";
+import { parseExtraEnvVars, serializeExtraEnvVars, resolveExtraEnvName, type ExtraEnvEntry } from "./extraEnv";
 import { refreshGames } from "./appPanel";
 import { state, notify, isGameRunning } from "./state";
 
@@ -36,7 +37,6 @@ const fieldDefs: Array<{ key: keyof DeployConf; label: string; required: boolean
   { key: "dropletRegion", label: "DROPLET_REGION (optional)", required: false },
   { key: "dropletImage", label: "DROPLET_IMAGE (optional)", required: false },
   { key: "dropletSize", label: "DROPLET_SIZE (optional)", required: false },
-  { key: "extraEnvVars", label: "EXTRA_ENV_VARS (optional, space-separated names)", required: false },
 ];
 
 export function createConfigForm(): { el: HTMLElement; render: () => void } {
@@ -83,6 +83,113 @@ export function createConfigForm(): { el: HTMLElement; render: () => void } {
     grid.appendChild(wrapper);
     inputs[def.key] = input;
   }
+  if (inputs.envVarPrefix) {
+    inputs.envVarPrefix.oninput = () => {
+      for (const row of extraEnvRows) updateRowResolved(row);
+    };
+  }
+
+  // EXTRA_ENV_VARS is a list of rows (name + optional prefix concat), not a
+  // single space-separated field — commas in a pasted list used to fail
+  // validation as part of the name. Stored back as the same deploy.conf
+  // string create.sh sources ("+NAME" means concat with ENV_VAR_PREFIX).
+  const extraEnvSection = document.createElement("div");
+  extraEnvSection.className = "field extra-env-section";
+  const extraEnvLabel = document.createElement("label");
+  extraEnvLabel.textContent = "EXTRA_ENV_VARS (optional)";
+  const extraEnvHint = document.createElement("p");
+  extraEnvHint.className = "hint";
+  extraEnvHint.textContent =
+    "One name per row. Check concat with prefix to prepend ENV_VAR_PREFIX (e.g. YT_API_KEY → TRACK_TIMELINE_YT_API_KEY).";
+  const extraEnvList = document.createElement("div");
+  extraEnvList.className = "extra-env-list";
+  const extraEnvAdd = document.createElement("button");
+  extraEnvAdd.type = "button";
+  extraEnvAdd.className = "secondary";
+  extraEnvAdd.textContent = "+ Add extra var";
+  extraEnvSection.append(extraEnvLabel, extraEnvHint, extraEnvList, extraEnvAdd);
+  form.appendChild(extraEnvSection);
+
+  type ExtraEnvRow = {
+    wrap: HTMLElement;
+    nameInput: HTMLInputElement;
+    prefixCheck: HTMLInputElement;
+    resolved: HTMLElement;
+  };
+  const extraEnvRows: ExtraEnvRow[] = [];
+
+  function prefixValue(): string {
+    return inputs.envVarPrefix?.value.trim() ?? "";
+  }
+
+  function updateRowResolved(row: ExtraEnvRow) {
+    const resolved = resolveExtraEnvName(
+      { name: row.nameInput.value, concatPrefix: row.prefixCheck.checked },
+      prefixValue(),
+    );
+    row.resolved.textContent = resolved && row.prefixCheck.checked ? `→ ${resolved}` : "";
+  }
+
+  function addExtraEnvRow(entry?: ExtraEnvEntry) {
+    const wrap = document.createElement("div");
+    wrap.className = "extra-env-row";
+
+    const nameInput = document.createElement("input");
+    nameInput.type = "text";
+    nameInput.placeholder = "YT_API_KEY";
+    nameInput.value = entry?.name ?? "";
+    nameInput.autocomplete = "off";
+
+    const checkLabel = document.createElement("label");
+    checkLabel.className = "extra-env-check";
+    const prefixCheck = document.createElement("input");
+    prefixCheck.type = "checkbox";
+    // New rows default to concatenating the prefix — that's the usual case
+    // (game-prefixed API keys). Unchecked means inject the name as-is.
+    prefixCheck.checked = entry?.concatPrefix ?? true;
+    checkLabel.append(prefixCheck, document.createTextNode(" concat with prefix"));
+
+    const resolved = document.createElement("span");
+    resolved.className = "extra-env-resolved";
+
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "secondary";
+    remove.textContent = "Remove";
+
+    const row: ExtraEnvRow = { wrap, nameInput, prefixCheck, resolved };
+    nameInput.oninput = () => updateRowResolved(row);
+    prefixCheck.onchange = () => updateRowResolved(row);
+    remove.onclick = () => {
+      wrap.remove();
+      const idx = extraEnvRows.indexOf(row);
+      if (idx >= 0) extraEnvRows.splice(idx, 1);
+    };
+
+    wrap.append(nameInput, checkLabel, resolved, remove);
+    extraEnvList.appendChild(wrap);
+    extraEnvRows.push(row);
+    updateRowResolved(row);
+  }
+
+  extraEnvAdd.onclick = () => addExtraEnvRow();
+
+  function extraEnvFromRows(): string {
+    return serializeExtraEnvVars(
+      extraEnvRows.map((r) => ({
+        name: r.nameInput.value,
+        concatPrefix: r.prefixCheck.checked,
+      })),
+    );
+  }
+
+  function fillExtraEnvRows(raw: string) {
+    extraEnvList.innerHTML = "";
+    extraEnvRows.length = 0;
+    for (const entry of parseExtraEnvVars(raw)) {
+      addExtraEnvRow(entry);
+    }
+  }
 
   const saveButton = document.createElement("button");
   saveButton.type = "submit";
@@ -99,6 +206,7 @@ export function createConfigForm(): { el: HTMLElement; render: () => void } {
     for (const def of fieldDefs) {
       conf[def.key] = inputs[def.key]!.value;
     }
+    conf.extraEnvVars = extraEnvFromRows();
     return conf;
   }
 
@@ -106,6 +214,7 @@ export function createConfigForm(): { el: HTMLElement; render: () => void } {
     for (const def of fieldDefs) {
       inputs[def.key]!.value = conf[def.key] ?? "";
     }
+    fillExtraEnvRows(conf.extraEnvVars ?? "");
   }
 
   cloneButton.onclick = async () => {
@@ -221,6 +330,10 @@ export function createConfigForm(): { el: HTMLElement; render: () => void } {
       }
       cloneButton.disabled = others.length === 0;
     }
+
+    // Prefix edits should refresh the resolved-name hints on extra-env rows
+    // without rebuilding them (that would wipe in-progress typing).
+    for (const row of extraEnvRows) updateRowResolved(row);
   }
 
   render();

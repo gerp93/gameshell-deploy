@@ -87,18 +87,19 @@ injects DO app env vars with matching keys — `${ENV_VAR_PREFIX}_SQL_HOST`,
 `_SQL_USER`, `_SQL_PASSWORD`, `_SQL_DATABASE`. Change it in one place.
 
 Games that need additional secrets (API keys, etc.) list the env var **names**
-in `deploy.conf`'s `EXTRA_ENV_VARS` (space-separated). Values stay in the
-operator's environment and are copied onto the DO app at create time, same as
-`DEPLOY_SQL_*`. Keys are injected as-is — if the game uses `ENV_VAR_PREFIX`,
-include it in the name:
+in `deploy.conf`'s `EXTRA_ENV_VARS` (space- or comma-separated). Values stay in
+the operator's environment and are copied onto the DO app at create time, same as
+`DEPLOY_SQL_*`. A leading `+` concatenates `ENV_VAR_PREFIX`; unmarked names are
+injected as-is:
 
 ```bash
 # in games/my-game/deploy.conf (names only, safe to commit)
-EXTRA_ENV_VARS=MY_GAME_OPENAI_API_KEY MY_GAME_OTHER_SECRET
+EXTRA_ENV_VARS=+OPENAI_API_KEY +OTHER_SECRET UNPREFIXED_KEY
 
 # in the operator's environment (values, never a file)
 export MY_GAME_OPENAI_API_KEY=...
 export MY_GAME_OTHER_SECRET=...
+export UNPREFIXED_KEY=...
 ./create.sh my-game
 ```
 

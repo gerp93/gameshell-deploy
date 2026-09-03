@@ -38,9 +38,12 @@ encrypts database backups at rest.
   copied from [deploy.conf.template](deploy.conf.template) — `APP_NAME`,
   `ENV_VAR_PREFIX`, `DB_NAME`, `HTTP_PORT`, `GIT_REPO`, optional `GIT_UPSTREAM`/
   `GIT_BRANCH`/`EXTRA_ENV_VARS`/droplet overrides. Only non-secret values live in
-  `deploy.conf`, so it's safe to commit. `EXTRA_ENV_VARS` is a space-separated
-  list of **names** (API keys, etc.) to copy from the operator's environment
-  onto the DO app — never the values themselves.
+  `deploy.conf`, so it's safe to commit. `EXTRA_ENV_VARS` is a space- or
+  comma-separated list of **names** (API keys, etc.) to copy from the
+  operator's environment onto the DO app — never the values themselves. A
+  leading `+` concatenates `ENV_VAR_PREFIX` (`+YT_API_KEY` with prefix
+  `TRACK_TIMELINE` becomes `TRACK_TIMELINE_YT_API_KEY`); unmarked names are
+  injected as-is.
 - **Data** (this repo, per-game, git-ignored): `games/APP_NAME/backups/`, a
   directory of GPG-encrypted database dumps (`*.sql.gpg`). The whole
   `backups/` directory is git-ignored (`games/*/backups/` in

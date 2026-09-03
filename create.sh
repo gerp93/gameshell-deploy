@@ -51,8 +51,10 @@
 #
 # Extra per-game secrets (API keys, etc.) are listed by NAME only in
 # deploy.conf's EXTRA_ENV_VARS and read from the environment at create
-# time — same rule as DEPLOY_SQL_*: values never live in a file. Each
-# name is injected onto the DO app as-is (not prefixed).
+# time — same rule as DEPLOY_SQL_*: values never live in a file. A
+# leading '+' concatenates ENV_VAR_PREFIX ("+YT_API_KEY" with prefix
+# TRACK_TIMELINE becomes TRACK_TIMELINE_YT_API_KEY); unmarked names
+# are injected as-is. Commas are treated as separators, same as spaces.
 ################################################################################
 
 set -e # exit on any command error
@@ -369,13 +371,28 @@ if [[ -z "$DEPLOY_SQL_PASSWORD" ]]; then
 	exit 1
 fi
 
-# EXTRA_ENV_VARS names are validated and required here, before the droplet
-# is created, so a missing API key fails the same way a missing SQL
-# password does — not after there are cloud resources to clean up.
-if [[ -n "$EXTRA_ENV_VARS" ]]; then
-	for extra_key in $EXTRA_ENV_VARS; do
+# EXTRA_ENV_VARS names are resolved (optional ENV_VAR_PREFIX concat) and
+# required here, before the droplet is created, so a missing API key fails
+# the same way a missing SQL password does — not after there are cloud
+# resources to clean up. Commas count as separators so a pasted "A, B"
+# list isn't one invalid name ending in a comma.
+EXTRA_ENV_RESOLVED=()
+EXTRA_ENV_VARS="${EXTRA_ENV_VARS//,/ }"
+if [[ -n "${EXTRA_ENV_VARS// }" ]]; then
+	for extra_token in $EXTRA_ENV_VARS; do
+		if [[ "$extra_token" == +* ]]; then
+			extra_name="${extra_token#+}"
+			if [[ -z "$extra_name" ]]; then
+				echo "Invalid EXTRA_ENV_VARS name: +"
+				echo "A leading '+' concatenates ENV_VAR_PREFIX onto the rest of the name."
+				exit 1
+			fi
+			extra_key="${ENV_VAR_PREFIX}_${extra_name}"
+		else
+			extra_key="$extra_token"
+		fi
 		if ! [[ "$extra_key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
-			echo "Invalid EXTRA_ENV_VARS name: $extra_key"
+			echo "Invalid EXTRA_ENV_VARS name: $extra_token (resolves to $extra_key)"
 			echo "Names must be alphanumeric-plus-underscore identifiers."
 			exit 1
 		fi
@@ -388,6 +405,7 @@ if [[ -n "$EXTRA_ENV_VARS" ]]; then
 			echo "Environment variable $extra_key contains a newline; refusing to put it in the app spec."
 			exit 1
 		fi
+		EXTRA_ENV_RESOLVED+=("$extra_key")
 	done
 fi
 
@@ -672,7 +690,7 @@ sed \
 # time. Inserted immediately before the service's `github:` block, which
 # follows `envs:` in templates/spec.yaml. Values are double-quoted YAML
 # scalars so `#`, `:`, etc. in an API key don't get parsed as YAML.
-if [[ -n "$EXTRA_ENV_VARS" ]]; then
+if [[ ${#EXTRA_ENV_RESOLVED[@]} -gt 0 ]]; then
 	echo "Injecting Extra Env Vars..."
 	EXTRA_SPEC_PATH=$(mktemp)
 	# This tempfile holds API keys, same as APP_SPEC_PATH holds the SQL
@@ -686,7 +704,7 @@ if [[ -n "$EXTRA_ENV_VARS" ]]; then
 	INSERTED=0
 	while IFS= read -r line || [[ -n "$line" ]]; do
 		if [[ $INSERTED -eq 0 && "$line" == "  github:" ]]; then
-			for extra_key in $EXTRA_ENV_VARS; do
+			for extra_key in "${EXTRA_ENV_RESOLVED[@]}"; do
 				extra_val="${!extra_key}"
 				escaped=${extra_val//\\/\\\\}
 				escaped=${escaped//\"/\\\"}
