@@ -18,10 +18,11 @@ APP_NAME=my-game
 ENV_VAR_PREFIX=MY_GAME
 
 # Optional: extra env var NAMES to copy from the operator's environment onto
-# the DO app (API keys, etc.). Space-separated. Values never live in this
-# file — create.sh looks each name up at deploy time, same as DEPLOY_SQL_*.
-# Keys are injected as-is (not prefixed); if the game uses ENV_VAR_PREFIX,
-# include it in the name (e.g. MY_GAME_OPENAI_API_KEY).
+# the DO app (API keys, etc.). Space- or comma-separated. Values never live
+# in this file — create.sh looks each name up at deploy time, same as
+# DEPLOY_SQL_*. A leading '+' concatenates ENV_VAR_PREFIX
+# ("+YT_API_KEY" becomes MY_GAME_YT_API_KEY); unmarked names are injected
+# as-is.
 EXTRA_ENV_VARS=
 
 # Database name created on the droplet and restored into.

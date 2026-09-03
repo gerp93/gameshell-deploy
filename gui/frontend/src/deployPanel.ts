@@ -12,6 +12,7 @@ import { createLogPane } from "./logPane";
 import { refreshStatus, scheduleStatusReconcile } from "./appPanel";
 import { state, preflightPassed, isDeployed, isGameRunning, getGameRun, clearGameRun, notify } from "./state";
 import { createRunSummary } from "./runSummary";
+import { resolveExtraEnvNames } from "./extraEnv";
 
 export function createDeployPanel(): { el: HTMLElement; render: () => void } {
   const el = document.createElement("div");
@@ -108,9 +109,10 @@ export function createDeployPanel(): { el: HTMLElement; render: () => void } {
   let extraEnvFor = "";
 
   function extraEnvNames(): string[] {
-    const raw = state.deployConf?.extraEnvVars?.trim() ?? "";
-    if (!raw) return [];
-    return raw.split(/\s+/).filter(Boolean);
+    return resolveExtraEnvNames(
+      state.deployConf?.extraEnvVars ?? "",
+      state.deployConf?.envVarPrefix ?? "",
+    );
   }
 
   function rebuildExtraEnvFields() {

@@ -27,6 +27,9 @@ type DeployConf struct {
 	DropletSize   string `json:"dropletSize"`
 	// ExtraEnvVars is a space-separated list of env var NAMES (not values)
 	// copied from the operator's environment onto the DO app at create time.
+	// A leading '+' means concat with ENV_VAR_PREFIX ("+YT_API_KEY" with
+	// prefix TRACK_TIMELINE becomes TRACK_TIMELINE_YT_API_KEY). Commas are
+	// treated as separators, same as spaces.
 	ExtraEnvVars string `json:"extraEnvVars"`
 }
 
@@ -184,12 +187,36 @@ func Validate(conf DeployConf) []string {
 	if conf.GitRepo != "" && !gitRepoPattern.MatchString(conf.GitRepo) {
 		errs = append(errs, "GIT_REPO must look like owner/name")
 	}
-	for _, name := range strings.Fields(conf.ExtraEnvVars) {
-		if !envVarNamePattern.MatchString(name) {
-			errs = append(errs, "EXTRA_ENV_VARS contains an invalid name: "+name)
+	for _, tok := range extraEnvTokens(conf.ExtraEnvVars) {
+		name, concatPrefix, ok := parseExtraEnvToken(tok)
+		if !ok || !envVarNamePattern.MatchString(name) {
+			errs = append(errs, "EXTRA_ENV_VARS contains an invalid name: "+tok)
+			continue
+		}
+		if concatPrefix {
+			resolved := conf.EnvVarPrefix + "_" + name
+			if !envVarNamePattern.MatchString(resolved) {
+				errs = append(errs, "EXTRA_ENV_VARS concatenates to an invalid name: "+resolved)
+			}
 		}
 	}
 	return errs
+}
+
+// extraEnvTokens splits EXTRA_ENV_VARS on whitespace and commas so a pasted
+// "A, B" list isn't one token ending in a comma.
+func extraEnvTokens(raw string) []string {
+	return strings.Fields(strings.ReplaceAll(raw, ",", " "))
+}
+
+// parseExtraEnvToken reads one EXTRA_ENV_VARS token. A leading '+' means
+// concat with ENV_VAR_PREFIX; the rest is the name.
+func parseExtraEnvToken(tok string) (name string, concatPrefix bool, ok bool) {
+	if strings.HasPrefix(tok, "+") {
+		name = strings.TrimPrefix(tok, "+")
+		return name, true, name != ""
+	}
+	return tok, false, tok != ""
 }
 
 func requireNonEmpty(errs *[]string, name, value string) {
