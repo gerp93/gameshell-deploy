@@ -25,6 +25,9 @@ type DeployConf struct {
 	DropletRegion string `json:"dropletRegion"`
 	DropletImage  string `json:"dropletImage"`
 	DropletSize   string `json:"dropletSize"`
+	// ExtraEnvVars is a space-separated list of env var NAMES (not values)
+	// copied from the operator's environment onto the DO app at create time.
+	ExtraEnvVars string `json:"extraEnvVars"`
 }
 
 type field struct {
@@ -43,6 +46,7 @@ var fields = []field{
 	{"DROPLET_REGION", func(c *DeployConf) *string { return &c.DropletRegion }},
 	{"DROPLET_IMAGE", func(c *DeployConf) *string { return &c.DropletImage }},
 	{"DROPLET_SIZE", func(c *DeployConf) *string { return &c.DropletSize }},
+	{"EXTRA_ENV_VARS", func(c *DeployConf) *string { return &c.ExtraEnvVars }},
 }
 
 func fieldByKey(key string) *field {
@@ -100,6 +104,11 @@ func CreateFromTemplate(templatePath, destPath string) error {
 // Save rewrites only the value on each recognized KEY= line in path,
 // leaving comments, blank lines, and unrecognized lines untouched. path
 // must already exist (create it first via CreateFromTemplate).
+//
+// Recognized keys that weren't in the file yet (e.g. EXTRA_ENV_VARS on an
+// older deploy.conf) are appended when their value is non-empty, so a GUI
+// save can introduce them without requiring a hand-edit. Empty optional
+// values are not appended, so a short existing conf doesn't grow blanks.
 func Save(path string, conf DeployConf) error {
 	f, err := os.Open(path)
 	if err != nil {
@@ -107,6 +116,7 @@ func Save(path string, conf DeployConf) error {
 	}
 
 	var out []string
+	seen := map[string]bool{}
 	scanner := bufio.NewScanner(f)
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -114,6 +124,7 @@ func Save(path string, conf DeployConf) error {
 		if ok {
 			if fl := fieldByKey(key); fl != nil {
 				line = key + "=" + *fl.get(&conf)
+				seen[key] = true
 			}
 		}
 		out = append(out, line)
@@ -122,6 +133,15 @@ func Save(path string, conf DeployConf) error {
 	f.Close()
 	if scanErr != nil {
 		return scanErr
+	}
+
+	for _, fl := range fields {
+		if seen[fl.key] {
+			continue
+		}
+		if v := *fl.get(&conf); v != "" {
+			out = append(out, fl.key+"="+v)
+		}
 	}
 
 	return os.WriteFile(path, []byte(strings.Join(out, "\n")+"\n"), 0o644)
@@ -142,6 +162,7 @@ func parseLine(line string) (key, value string, ok bool) {
 }
 
 var gitRepoPattern = regexp.MustCompile(`^[\w.-]+/[\w.-]+$`)
+var envVarNamePattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
 // Validate performs the same lightweight, non-authoritative checks the GUI
 // form runs before a save — it exists to catch typos early, not to replace
@@ -162,6 +183,11 @@ func Validate(conf DeployConf) []string {
 	}
 	if conf.GitRepo != "" && !gitRepoPattern.MatchString(conf.GitRepo) {
 		errs = append(errs, "GIT_REPO must look like owner/name")
+	}
+	for _, name := range strings.Fields(conf.ExtraEnvVars) {
+		if !envVarNamePattern.MatchString(name) {
+			errs = append(errs, "EXTRA_ENV_VARS contains an invalid name: "+name)
+		}
 	}
 	return errs
 }

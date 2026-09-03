@@ -5,7 +5,8 @@
 # gameshell-deploy scripts (create.sh / delete.sh), invoked as
 # `./create.sh APP_NAME` / `./delete.sh APP_NAME`. Only non-secret values live
 # here — database credentials come from the operator's environment
-# (DEPLOY_SQL_USER / DEPLOY_SQL_PASSWORD). Backups for this game live in
+# (DEPLOY_SQL_USER / DEPLOY_SQL_PASSWORD), extra secrets from EXTRA_ENV_VARS
+# names looked up in the environment. Backups for this game live in
 # games/APP_NAME/backups/.
 
 # DO app + droplet base name (droplet is "<APP_NAME>-database").
@@ -15,6 +16,13 @@ APP_NAME=my-game
 # database.SetEnvVarPrefix(...) call in main.go. Drives the env var KEYS injected
 # into the DO app (e.g. MY_GAME_SQL_HOST, MY_GAME_SQL_USER, ...).
 ENV_VAR_PREFIX=MY_GAME
+
+# Optional: extra env var NAMES to copy from the operator's environment onto
+# the DO app (API keys, etc.). Space-separated. Values never live in this
+# file — create.sh looks each name up at deploy time, same as DEPLOY_SQL_*.
+# Keys are injected as-is (not prefixed); if the game uses ENV_VAR_PREFIX,
+# include it in the name (e.g. MY_GAME_OPENAI_API_KEY).
+EXTRA_ENV_VARS=
 
 # Database name created on the droplet and restored into.
 DB_NAME=MY_GAME

@@ -56,6 +56,10 @@ type CreateRequest struct {
 	SQLUser       string `json:"sqlUser"`
 	SQLPassword   string `json:"sqlPassword"`
 	GPGPassphrase string `json:"gpgPassphrase"`
+	// ExtraEnv is KEY=value pairs listed (by name) in deploy.conf's
+	// EXTRA_ENV_VARS. Keys are the env var names copied onto the DO app;
+	// values come from the operator (never from deploy.conf).
+	ExtraEnv map[string]string `json:"extraEnv"`
 }
 
 // DeleteRequest mirrors delete.sh's positional arg + flag. Backup is
@@ -99,6 +103,9 @@ func RunCreate(req CreateRequest, emit Emitter) error {
 	}
 	if req.GPGPassphrase != "" {
 		env = append(env, "GPG_PASSPHRASE="+req.GPGPassphrase)
+	}
+	for k, v := range req.ExtraEnv {
+		env = append(env, k+"="+v)
 	}
 	scriptPath := filepath.Join(req.OpsDir, "create.sh")
 	return run(req.AppName, scriptPath, args, env, "create", emit)

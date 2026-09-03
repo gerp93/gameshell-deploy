@@ -48,6 +48,11 @@
 #                        pinentry. Needed when driven from the GUI, which has
 #                        no TTY for pinentry to use; omit it for normal
 #                        interactive CLI use and gpg prompts as usual.
+#
+# Extra per-game secrets (API keys, etc.) are listed by NAME only in
+# deploy.conf's EXTRA_ENV_VARS and read from the environment at create
+# time — same rule as DEPLOY_SQL_*: values never live in a file. Each
+# name is injected onto the DO app as-is (not prefixed).
 ################################################################################
 
 set -e # exit on any command error
@@ -171,6 +176,10 @@ source "$CONFIG_PATH"
 : "${DB_NAME:?deploy.conf must set DB_NAME}"
 : "${HTTP_PORT:?deploy.conf must set HTTP_PORT}"
 : "${GIT_REPO:?deploy.conf must set GIT_REPO}"
+
+# Optional: space-separated env var names copied from the operator's
+# environment onto the DO app. Empty means SQL creds only.
+EXTRA_ENV_VARS="${EXTRA_ENV_VARS:-}"
 
 DROPLET_REGION="${DROPLET_REGION:-nyc3}"
 # --region overrides deploy.conf for this run only — the tracked config is
@@ -358,6 +367,28 @@ fi
 if [[ -z "$DEPLOY_SQL_PASSWORD" ]]; then
 	echo "Environment variable not found: DEPLOY_SQL_PASSWORD"
 	exit 1
+fi
+
+# EXTRA_ENV_VARS names are validated and required here, before the droplet
+# is created, so a missing API key fails the same way a missing SQL
+# password does — not after there are cloud resources to clean up.
+if [[ -n "$EXTRA_ENV_VARS" ]]; then
+	for extra_key in $EXTRA_ENV_VARS; do
+		if ! [[ "$extra_key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
+			echo "Invalid EXTRA_ENV_VARS name: $extra_key"
+			echo "Names must be alphanumeric-plus-underscore identifiers."
+			exit 1
+		fi
+		if [[ -z "${!extra_key}" ]]; then
+			echo "Environment variable not found: $extra_key"
+			echo "Set it in the environment (same as DEPLOY_SQL_USER/PASSWORD). deploy.conf lists the name only."
+			exit 1
+		fi
+		if [[ "${!extra_key}" == *$'\n'* || "${!extra_key}" == *$'\r'* ]]; then
+			echo "Environment variable $extra_key contains a newline; refusing to put it in the app spec."
+			exit 1
+		fi
+	done
 fi
 
 ################################################################################
@@ -634,6 +665,44 @@ sed \
 	-e "s|REPLACE_GIT_REPO|${GIT_REPO}|g" \
 	-e "s|REPLACE_GIT_BRANCH|${GIT_BRANCH}|g" \
 	"$OPS_DIR/templates/spec.yaml" > "$APP_SPEC_PATH"
+
+# Extra env vars are appended to the rendered spec rather than going
+# through sed: their values can contain `/` or `|` (the delimiters the
+# substitutions above use), and they aren't known at template-authoring
+# time. Inserted immediately before the service's `github:` block, which
+# follows `envs:` in templates/spec.yaml. Values are double-quoted YAML
+# scalars so `#`, `:`, etc. in an API key don't get parsed as YAML.
+if [[ -n "$EXTRA_ENV_VARS" ]]; then
+	echo "Injecting Extra Env Vars..."
+	EXTRA_SPEC_PATH=$(mktemp)
+	# This tempfile holds API keys, same as APP_SPEC_PATH holds the SQL
+	# password — extend the EXIT trap rather than replacing it, so the
+	# fork-sync dir (if any) is still cleaned up.
+	if [[ -n "${SYNC_DIR:-}" ]]; then
+		trap 'rm -rf "$SYNC_DIR"; rm -f "$SETUP_SCRIPT_PATH" "$APP_SPEC_PATH" "$EXTRA_SPEC_PATH"' EXIT
+	else
+		trap 'rm -f "$SETUP_SCRIPT_PATH" "$APP_SPEC_PATH" "$EXTRA_SPEC_PATH"' EXIT
+	fi
+	INSERTED=0
+	while IFS= read -r line || [[ -n "$line" ]]; do
+		if [[ $INSERTED -eq 0 && "$line" == "  github:" ]]; then
+			for extra_key in $EXTRA_ENV_VARS; do
+				extra_val="${!extra_key}"
+				escaped=${extra_val//\\/\\\\}
+				escaped=${escaped//\"/\\\"}
+				printf '  - key: %s\n    scope: RUN_AND_BUILD_TIME\n    value: "%s"\n' "$extra_key" "$escaped"
+			done
+			INSERTED=1
+		fi
+		printf '%s\n' "$line"
+	done < "$APP_SPEC_PATH" > "$EXTRA_SPEC_PATH"
+	mv "$EXTRA_SPEC_PATH" "$APP_SPEC_PATH"
+	if [[ $INSERTED -eq 0 ]]; then
+		echo "Could not inject EXTRA_ENV_VARS: no '  github:' marker in the rendered app spec"
+		exit 1
+	fi
+	echo "Extra Env Vars Injected"
+fi
 
 APP_URL=$(
 	doctl apps create \

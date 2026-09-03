@@ -37,8 +37,10 @@ encrypts database backups at rest.
 - **Config** (this repo, per-game, tracked): `games/APP_NAME/deploy.conf`,
   copied from [deploy.conf.template](deploy.conf.template) — `APP_NAME`,
   `ENV_VAR_PREFIX`, `DB_NAME`, `HTTP_PORT`, `GIT_REPO`, optional `GIT_UPSTREAM`/
-  `GIT_BRANCH`/droplet overrides. Only non-secret values live in
-  `deploy.conf`, so it's safe to commit.
+  `GIT_BRANCH`/`EXTRA_ENV_VARS`/droplet overrides. Only non-secret values live in
+  `deploy.conf`, so it's safe to commit. `EXTRA_ENV_VARS` is a space-separated
+  list of **names** (API keys, etc.) to copy from the operator's environment
+  onto the DO app — never the values themselves.
 - **Data** (this repo, per-game, git-ignored): `games/APP_NAME/backups/`, a
   directory of GPG-encrypted database dumps (`*.sql.gpg`). The whole
   `backups/` directory is git-ignored (`games/*/backups/` in
@@ -49,7 +51,13 @@ encrypts database backups at rest.
   `DEPLOY_SQL_USER` / `DEPLOY_SQL_PASSWORD` (used to create the MariaDB user
   on the droplet). Per-game secrets like `CARD_JUDGE_SQL_PASSWORD` are
   runtime env vars on the DO App, injected by `create.sh` from the operator's
-  `DEPLOY_SQL_*` values — never written to a tracked file.
+  `DEPLOY_SQL_*` values — never written to a tracked file. Additional
+  per-game secrets named in `EXTRA_ENV_VARS` are copied the same way: the
+  name lives in `deploy.conf`, the value is read from the environment at
+  create time and written into the rendered app spec (not through `sed`,
+  because values can contain the delimiters the SQL substitutions use).
+  Don't hardcode a game's API key name into `create.sh`/`templates/spec.yaml`
+  — that's what `EXTRA_ENV_VARS` is for.
 - **`GPG_PASSPHRASE`** (optional operator secret): backups are symmetric
   `gpg -c`/`gpg -d`, which normally prompts interactively via pinentry — fine
   for CLI use, but the GUI has no TTY for that. When set, `create.sh`/
