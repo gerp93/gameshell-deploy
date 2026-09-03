@@ -84,7 +84,25 @@ jobs:
         run: echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
 
       - name: Install Wails CLI
-        run: go install github.com/wailsapp/wails/v2/cmd/wails@latest
+        shell: bash
+        run: |
+          set -e
+          # Pin to the library version in gui/go.mod rather than @latest.
+          # @latest has pulled a newer CLI (e.g. v2.15) than the app module
+          # (v2.13), and that extra dependency graph is what failed Linux
+          # on a transient sum.golang.org INTERNAL_ERROR verifying pterm.
+          WAILS_VERSION=$(awk '/github.com\/wailsapp\/wails\/v2 / {print $2; exit}' gui/go.mod)
+          : "${WAILS_VERSION:?could not read wails version from gui/go.mod}"
+          echo "Installing wails CLI ${WAILS_VERSION}"
+          for attempt in 1 2 3 4 5; do
+            if go install "github.com/wailsapp/wails/v2/cmd/wails@${WAILS_VERSION}"; then
+              exit 0
+            fi
+            echo "go install wails failed (attempt ${attempt}/5); sum.golang.org flakes are usually transient, retrying..."
+            sleep $((attempt * 8))
+          done
+          echo "go install wails failed after 5 attempts"
+          exit 1
 
       # Ubuntu 24.04 (ubuntu-latest) only ships webkit2gtk 4.1's dev
       # package, not the older 4.0 Wails v2 defaults to — build with the
