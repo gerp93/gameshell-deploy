@@ -177,12 +177,13 @@ func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
 		_ = os.Remove(tmpName)
 		return err
 	}
+	// Rename already replaces an existing dest (including on Windows via
+	// MoveFileEx REPLACE_EXISTING). Do not Remove the dest first: a
+	// locked file can be marked pending-delete while the name stays
+	// reserved, so a retry still fails and the denylist is gone.
 	if err := os.Rename(tmpName, path); err != nil {
-		_ = os.Remove(path)
-		if err := os.Rename(tmpName, path); err != nil {
-			_ = os.Remove(tmpName)
-			return err
-		}
+		_ = os.Remove(tmpName)
+		return err
 	}
 	return nil
 }
