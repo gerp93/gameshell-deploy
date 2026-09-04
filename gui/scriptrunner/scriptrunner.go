@@ -54,7 +54,10 @@ type ExtraEnvVar struct {
 
 // CreateRequest mirrors create.sh's positional arg + flags.
 type CreateRequest struct {
-	OpsDir     string `json:"opsDir"`
+	OpsDir string `json:"opsDir"`
+	// ScriptDir is where create.sh lives (install dir or git checkout).
+	// Empty means OpsDir, which is the data dir in the GUI.
+	ScriptDir  string `json:"scriptDir"`
 	AppName    string `json:"appName"`
 	SSHKeyName string `json:"sshKeyName"`
 	Tier       string `json:"tier"`
@@ -77,6 +80,7 @@ type CreateRequest struct {
 // for completeness).
 type DeleteRequest struct {
 	OpsDir        string `json:"opsDir"`
+	ScriptDir     string `json:"scriptDir"`
 	AppName       string `json:"appName"`
 	Backup        string `json:"backup"`
 	GPGPassphrase string `json:"gpgPassphrase"`
@@ -128,7 +132,16 @@ func RunCreate(req CreateRequest, emit Emitter) error {
 		defer os.Remove(yamlHost)
 		env = append(env, "EXTRA_ENV_YAML_FILE="+yamlScript)
 	}
-	scriptPath := filepath.Join(req.OpsDir, "create.sh")
+	env, err = withDataDir(req.OpsDir, env)
+	if err != nil {
+		emit.EmitExit("create:exit", ExitInfo{AppName: req.AppName, Code: -1, Err: err.Error()})
+		return err
+	}
+	scriptDir := req.ScriptDir
+	if scriptDir == "" {
+		scriptDir = req.OpsDir
+	}
+	scriptPath := filepath.Join(scriptDir, "create.sh")
 	return run(req.AppName, req.OpsDir, scriptPath, args, env, "create", emit)
 }
 
@@ -143,7 +156,16 @@ func RunDelete(req DeleteRequest, emit Emitter) error {
 	if req.GPGPassphrase != "" {
 		env = append(env, "GPG_PASSPHRASE="+req.GPGPassphrase)
 	}
-	scriptPath := filepath.Join(req.OpsDir, "delete.sh")
+	env, err := withDataDir(req.OpsDir, env)
+	if err != nil {
+		emit.EmitExit("delete:exit", ExitInfo{AppName: req.AppName, Code: -1, Err: err.Error()})
+		return err
+	}
+	scriptDir := req.ScriptDir
+	if scriptDir == "" {
+		scriptDir = req.OpsDir
+	}
+	scriptPath := filepath.Join(scriptDir, "delete.sh")
 	return run(req.AppName, req.OpsDir, scriptPath, args, env, "delete", emit)
 }
 
@@ -168,13 +190,17 @@ type TierOption struct {
 // region is optional: empty means "whatever deploy.conf's DROPLET_REGION
 // says", anything else is passed through as --region= to check a region the
 // operator is considering without editing the tracked config.
-func ListAvailableTiers(opsDir, appName, region string) ([]TierOption, error) {
-	scriptPath := filepath.Join(opsDir, "create.sh")
+func ListAvailableTiers(scriptDir, dataDir, appName, region string) ([]TierOption, error) {
+	scriptPath := filepath.Join(scriptDir, "create.sh")
 	args := []string{appName, "--list-tiers"}
 	if region != "" {
 		args = append(args, "--region="+region)
 	}
-	cmd, err := platform.ScriptCommand(scriptPath, args, nil)
+	env, err := withDataDir(dataDir, nil)
+	if err != nil {
+		return nil, err
+	}
+	cmd, err := platform.ScriptCommand(scriptPath, args, env)
 	if err != nil {
 		return nil, err
 	}
@@ -216,9 +242,13 @@ type RegionOption struct {
 // ListAvailableRegions runs `create.sh APP_NAME --list-regions`, the same
 // list create.sh's interactive retry prompt offers when the configured
 // region has no tiers available.
-func ListAvailableRegions(opsDir, appName string) ([]RegionOption, error) {
-	scriptPath := filepath.Join(opsDir, "create.sh")
-	cmd, err := platform.ScriptCommand(scriptPath, []string{appName, "--list-regions"}, nil)
+func ListAvailableRegions(scriptDir, dataDir, appName string) ([]RegionOption, error) {
+	scriptPath := filepath.Join(scriptDir, "create.sh")
+	env, err := withDataDir(dataDir, nil)
+	if err != nil {
+		return nil, err
+	}
+	cmd, err := platform.ScriptCommand(scriptPath, []string{appName, "--list-regions"}, env)
 	if err != nil {
 		return nil, err
 	}
@@ -331,6 +361,17 @@ func containsLine(output, substr string) bool {
 		}
 	}
 	return false
+}
+
+func withDataDir(dataDir string, env []string) ([]string, error) {
+	if dataDir == "" {
+		return env, nil
+	}
+	p, err := platform.ToScriptPath(dataDir)
+	if err != nil {
+		return nil, err
+	}
+	return append(env, "GAMESHELL_DATA_DIR="+p), nil
 }
 
 // Cancel kills the running script for appName, if any. It does not clean up
