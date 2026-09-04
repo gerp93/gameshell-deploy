@@ -118,6 +118,7 @@ export const saveSecrets = (bundle: SecretsBundle): Promise<void> =>
   Backend.SaveSecrets(bundle as never);
 export const forgetSecrets = (extraNames: string[]): Promise<void> => Backend.ForgetSecrets(extraNames);
 export const getOpsDir = (): Promise<string> => Backend.GetOpsDir();
+export const getAppVersion = (): Promise<string> => Backend.GetAppVersion();
 export const openOpsDir = (opsDir: string): Promise<void> => Backend.OpenOpsDir(opsDir);
 export const listGames = (opsDir: string): Promise<string[]> => Backend.ListGames(opsDir);
 export const selectApp = (appName: string): Promise<void> => Backend.SelectApp(appName);
@@ -148,8 +149,6 @@ export const runCreate = (req: CreateRequest): Promise<void> => Backend.RunCreat
 export const runDelete = (req: DeleteRequest): Promise<void> => Backend.RunDelete(req);
 export const cancelRun = (appName: string): Promise<boolean> => Backend.CancelRun(appName);
 
-// See app.go's CheckForUpdate/ApplyUpdate — this path is not yet verified
-// end-to-end against a real tagged release.
 export const checkForUpdate = (): Promise<UpdateInfo> => Backend.CheckForUpdate();
 export const applyUpdate = (): Promise<void> => Backend.ApplyUpdate();
 

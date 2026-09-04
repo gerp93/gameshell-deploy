@@ -24,6 +24,18 @@ non-interactive flags to `create.sh`/`delete.sh` (see their headers); it never
 hardcodes game-specific values, and it drives the scripts the same way the CLI
 does — by app name, reading/writing `games/APP_NAME/deploy.conf`.
 
+On Windows, install the GUI with the release **setup.exe** (per-user, no admin)
+into `%LOCALAPPDATA%\Programs\gameshell-deploy-gui`. Operator data
+(`games/`, backups, last-run logs) lives in `%APPDATA%\gameshell-deploy` and is
+never overwritten by the installer or by Check for Updates. `{app}` has no live
+`games/` folder; seed `deploy.conf` files are at `{app}\seed\games` and are
+copied into the data dir only when that game folder does not already exist
+(deleted or renamed names are listed in `removed-games.json` so they are
+not resurrected on the next launch).
+A git checkout of this repo keeps today's layout (scripts and games in the
+repo) — do not move a checkout's games into AppData. The GUI always passes
+`GAMESHELL_DATA_DIR` so `create.sh`/`delete.sh` read and write that data dir.
+
 Target platform: **Digital Ocean** (`doctl` for both a MariaDB droplet and a
 DO App Platform app), driven from a **Linux/macOS shell** (`bash`). GPG
 encrypts database backups at rest.
@@ -55,7 +67,8 @@ encrypts database backups at rest.
   Never commit a decrypted `*.sql` file regardless. The GUI also writes
   `games/APP_NAME/last-create.log` / `last-delete.log` (git-ignored) so a
   failed deploy that leaves a droplet doesn't lose the script output when
-  the Action tab flips to Teardown.
+  the Action tab flips to Teardown. From the installed Windows GUI those
+  paths are under `%APPDATA%\gameshell-deploy\games\`, not under `{app}`.
 - **Secrets** come from the operator's environment, never from a file:
   `DEPLOY_SQL_USER` / `DEPLOY_SQL_PASSWORD` (used to create the MariaDB user
   on the droplet). Per-game secrets like `CARD_JUDGE_SQL_PASSWORD` are

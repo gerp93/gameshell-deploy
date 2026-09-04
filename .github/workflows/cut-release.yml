@@ -75,5 +75,6 @@ jobs:
       app_name: gameshell-deploy-gui
       gui_dir: gui
       extra_stage_paths: "create.sh delete.sh README.md CLAUDE.md templates deploy.conf.template games"
+      version_ldflag_package: main
     permissions:
       contents: write

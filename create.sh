@@ -6,9 +6,13 @@
 #         ./create.sh APP_NAME --list-tiers [--region=SLUG]
 #         ./create.sh APP_NAME --list-regions
 #   APP_NAME is the game name (e.g., timeline-trivia, card-judge). Config and
-#   backups are read from games/APP_NAME/ relative to this script — deploy.conf
-#   (see deploy.conf.template) and a backups/ directory holding at least one
-#   GPG-encrypted database backup (*.sql.gpg).
+#   backups are read from games/APP_NAME/ — relative to this script, or
+#   (when set) relative to GAMESHELL_DATA_DIR. The GUI always sets that
+#   to the operator data dir so an installed Windows app update never
+#   clobbers games/*/backups. Unset, this is the script's own directory
+#   (same as today's CLI from a git checkout). deploy.conf is copied from
+#   deploy.conf.template; backups/ holds at least one GPG-encrypted
+#   database backup (*.sql.gpg).
 #
 #   The branch deployed comes from deploy.conf's GIT_BRANCH; left blank, the
 #   repo's own default branch is detected and used.
@@ -48,6 +52,8 @@
 #                        pinentry. Needed when driven from the GUI, which has
 #                        no TTY for pinentry to use; omit it for normal
 #                        interactive CLI use and gpg prompts as usual.
+#   GAMESHELL_DATA_DIR   optional; writable games/ tree (deploy.conf +
+#                        backups). Defaults to this script's directory.
 #
 # Extra per-game secrets (API keys, etc.) are listed by NAME only in
 # deploy.conf's EXTRA_ENV_VARS. CLI use reads the values from the
@@ -64,6 +70,7 @@
 set -e # exit on any command error
 
 OPS_DIR="$(cd "$(dirname "$0")" && pwd)"
+DATA_DIR="${GAMESHELL_DATA_DIR:-$OPS_DIR}"
 
 ################################################################################
 # parse args
@@ -91,7 +98,7 @@ for arg in "$@"; do
 	esac
 done
 : "${APP_NAME_ARG:?Usage: ./create.sh APP_NAME [--ssh-key=NAME] [--tier=1|2|3] [--region=SLUG] [--yes] [--list-tiers] [--list-regions]}"
-GAME_CONFIG_DIR="$OPS_DIR/games/$APP_NAME_ARG"
+GAME_CONFIG_DIR="$DATA_DIR/games/$APP_NAME_ARG"
 
 # Both --list-* flags are query-only: they print and exit without deploying,
 # so everything below that exists to protect a real deploy (the staleness

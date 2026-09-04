@@ -1,4 +1,4 @@
-import { openOpsDir, checkForUpdate, applyUpdate } from "./api";
+import { openOpsDir, checkForUpdate, applyUpdate, getAppVersion } from "./api";
 import { createPreflightPanel } from "./preflightPanel";
 import { createAppPanel } from "./appPanel";
 import { createGameHeader } from "./gameHeader";
@@ -17,7 +17,16 @@ const app = document.getElementById("app")!;
 
 const header = document.createElement("header");
 header.className = "app-header";
-header.innerHTML = "<h1>gameshell-deploy</h1>";
+const titleWrap = document.createElement("div");
+titleWrap.className = "header-title";
+const title = document.createElement("h1");
+title.textContent = "gameshell-deploy";
+const versionEl = document.createElement("span");
+versionEl.className = "app-version";
+titleWrap.append(title, versionEl);
+void getAppVersion().then((v) => {
+  if (v) versionEl.textContent = v;
+});
 
 const headerActions = document.createElement("div");
 headerActions.className = "header-actions";
@@ -25,15 +34,10 @@ const themeSwitcher = createThemeSwitcher();
 const openFolderButton = document.createElement("button");
 openFolderButton.type = "button";
 openFolderButton.className = "secondary";
-openFolderButton.textContent = "Open repo folder";
+openFolderButton.textContent = "Open data folder";
 openFolderButton.disabled = true;
 openFolderButton.onclick = () => void openOpsDir(state.opsDir);
 
-// See app.go's CheckForUpdate/ApplyUpdate — not yet verified end-to-end
-// against a real tagged release, and always reports "up to date" until
-// release-go-gui.yml is updated to stamp a version into the build (see
-// main.go's appVersion doc comment). Still wired in now so the frontend
-// half doesn't have to be revisited once that's fixed.
 const updateButton = document.createElement("button");
 updateButton.type = "button";
 updateButton.className = "secondary";
@@ -63,7 +67,7 @@ updateButton.onclick = () => {
 };
 
 headerActions.append(themeSwitcher, openFolderButton, updateButton);
-header.appendChild(headerActions);
+header.append(titleWrap, headerActions);
 
 const preflight = createPreflightPanel();
 

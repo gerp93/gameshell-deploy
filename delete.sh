@@ -4,8 +4,9 @@
 #
 # Usage:  ./delete.sh APP_NAME [--backup=yes|no]
 #   APP_NAME is the game name (e.g., timeline-trivia, card-judge). Config is
-#   read from games/APP_NAME/deploy.conf. A new GPG-encrypted backup is
-#   written into games/APP_NAME/backups before teardown (unless declined).
+#   read from games/APP_NAME/deploy.conf (or $GAMESHELL_DATA_DIR/games/...
+#   when that is set — the GUI always sets it). A new GPG-encrypted backup
+#   is written into games/APP_NAME/backups before teardown (unless declined).
 #
 #   --backup=yes|no  skip the backup prompt, use this answer
 #   This flag exists so GUI wrappers can drive this script non-interactively;
@@ -15,11 +16,15 @@
 # non-interactively (--batch --passphrase-fd) instead of prompting via
 # pinentry. Needed when driven from the GUI, which has no TTY for pinentry
 # to use; omit it for normal interactive CLI use and gpg prompts as usual.
+#
+# GAMESHELL_DATA_DIR (optional): writable games/ tree. Defaults to this
+# script's directory. The GUI always sets it to the operator data dir.
 ################################################################################
 
 set -e # exit on any command error
 
 OPS_DIR="$(cd "$(dirname "$0")" && pwd)"
+DATA_DIR="${GAMESHELL_DATA_DIR:-$OPS_DIR}"
 
 ################################################################################
 # check for new commits on this checkout's remote (never pulls automatically)
@@ -95,7 +100,7 @@ for arg in "$@"; do
 	esac
 done
 : "${APP_NAME_ARG:?Usage: ./delete.sh APP_NAME [--backup=yes|no]}"
-GAME_CONFIG_DIR="$OPS_DIR/games/$APP_NAME_ARG"
+GAME_CONFIG_DIR="$DATA_DIR/games/$APP_NAME_ARG"
 
 ################################################################################
 # load per-game config

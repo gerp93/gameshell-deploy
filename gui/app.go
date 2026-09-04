@@ -32,7 +32,9 @@ const (
 // App is the Wails-bound backend. Its exported methods are callable from
 // the frontend as window.go.main.App.<Method>.
 type App struct {
-	ctx context.Context
+	ctx       context.Context
+	scriptDir string
+	dataDir   string
 }
 
 func NewApp() *App {
@@ -43,6 +45,29 @@ func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
 }
 
+func (a *App) resolveDirs() error {
+	if a.dataDir != "" && a.scriptDir != "" {
+		return nil
+	}
+	scriptDir, err := findScriptDir()
+	if err != nil {
+		return err
+	}
+	dataDir, err := operatorDataDir(scriptDir)
+	if err != nil {
+		return err
+	}
+	a.scriptDir = scriptDir
+	a.dataDir = dataDir
+	return nil
+}
+
+// GetAppVersion is the build-time stamp (`-X main.appVersion=vX.Y.Z`), or
+// "0.0.0-dev" for local `wails dev` builds.
+func (a *App) GetAppVersion() string {
+	return appVersion
+}
+
 // --- settings / ops repo / game repo -----------------------------------
 
 // LoadSettings returns the persisted operator preferences (last app name).
@@ -51,33 +76,28 @@ func (a *App) LoadSettings() (settings.Settings, error) {
 	return settings.Load()
 }
 
-// GetOpsDir locates the gameshell-deploy checkout this GUI is running from
-// — it's always the checkout containing the running executable (gui is
-// built and run from inside it, normally at gui/build/bin/), never a
-// user-picked folder, since games/ is expected to live right alongside
-// create.sh/delete.sh in the same checkout as the GUI itself.
+// GetOpsDir returns the writable DATA dir (games/ and backups/), not the
+// script install dir. From a git checkout that's the repo (today's
+// behavior). From an installed app it's UserConfigDir/gameshell-deploy
+// (%APPDATA%\gameshell-deploy on Windows). Missing games are seeded from
+// scriptDir/seed/games or scriptDir/games only when that game folder does
+// not already exist and was not deleted or renamed away — never overwritten.
 func (a *App) GetOpsDir() (string, error) {
-	exe, err := os.Executable()
-	if err != nil {
+	if err := a.resolveDirs(); err != nil {
 		return "", err
 	}
-	dir := filepath.Dir(exe)
-	for i := 0; i < 6; i++ {
-		if validateOpsDir(dir) == nil {
-			return dir, nil
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			break
-		}
-		dir = parent
-	}
-	return "", fmt.Errorf("could not find a gameshell-deploy checkout (create.sh, delete.sh, templates/, deploy.conf.template) above %s", filepath.Dir(exe))
+	return a.dataDir, nil
 }
 
-// OpenOpsDir opens opsDir in the host's file manager (Explorer/Finder), so
-// the operator can inspect games/, backups/, etc. directly.
+// OpenOpsDir opens the data dir in the host's file manager (Explorer/Finder),
+// so the operator can inspect games/, backups/, etc. directly.
 func (a *App) OpenOpsDir(opsDir string) error {
+	if opsDir == "" {
+		if err := a.resolveDirs(); err != nil {
+			return err
+		}
+		opsDir = a.dataDir
+	}
 	return platform.OpenFolder(opsDir)
 }
 
@@ -204,7 +224,8 @@ func (a *App) OpenBackupsFolder(opsDir, appName string) error {
 // droplet/app) is edited separately in the Config tab, so this is safe to do
 // without touching cloud resources. Still refuses while a droplet/app is
 // live, since scripts are invoked by folder name and moving it mid-life
-// makes the running deployment harder to find.
+// makes the running deployment harder to find. On an installed app the old
+// name is recorded so seedMissingGames will not recreate it on next launch.
 func (a *App) RenameGame(opsDir, oldName, newName string) error {
 	newName = strings.TrimSpace(newName)
 	if newName == "" {
@@ -238,13 +259,23 @@ func (a *App) RenameGame(opsDir, oldName, newName string) error {
 	if _, err := os.Stat(newPath); err == nil {
 		return fmt.Errorf("a game named %s already exists", newName)
 	}
-	return os.Rename(gameConfigDir(opsDir, oldName), newPath)
+	if err := os.Rename(gameConfigDir(opsDir, oldName), newPath); err != nil {
+		return err
+	}
+	// Record the move only after it succeeded so a failed rename does not
+	// denylist the original name. Bookkeeping errors must not hide the
+	// completed rename from the frontend (the folder is already at newName).
+	_ = rememberRemovedGame(opsDir, oldName)
+	_ = forgetRemovedGame(opsDir, newName)
+	return nil
 }
 
 // DeleteGame permanently removes games/appName — its deploy.conf and any
 // locally stored backups — from disk. Refuses while Digital Ocean still
 // reports a live droplet/app for it: deleting the local config first would
-// destroy the only record of what still needs tearing down on DO.
+// destroy the only record of what still needs tearing down on DO. On an
+// installed app the name is recorded so the next launch will not recreate
+// the folder from the package seed.
 func (a *App) DeleteGame(opsDir, appName string) error {
 	confResult, err := a.LoadDeployConf(opsDir, appName)
 	if err != nil {
@@ -259,7 +290,11 @@ func (a *App) DeleteGame(opsDir, appName string) error {
 			return fmt.Errorf("%s still has a droplet/app on Digital Ocean — tear it down first", appName)
 		}
 	}
-	return os.RemoveAll(gameConfigDir(opsDir, appName))
+	if err := os.RemoveAll(gameConfigDir(opsDir, appName)); err != nil {
+		return err
+	}
+	_ = rememberRemovedGame(opsDir, appName)
+	return nil
 }
 
 // --- deploy.conf editor ---------------------------------------------------
@@ -294,12 +329,21 @@ func (a *App) CreateDeployConf(opsDir, appName string, conf deployconf.DeployCon
 	if err := os.MkdirAll(filepath.Join(configDir, "backups"), 0o755); err != nil {
 		return err
 	}
-	templatePath := filepath.Join(opsDir, "deploy.conf.template")
+	if err := a.resolveDirs(); err != nil {
+		return err
+	}
+	templatePath := filepath.Join(a.scriptDir, "deploy.conf.template")
 	destPath := filepath.Join(configDir, "deploy.conf")
 	if err := deployconf.CreateFromTemplate(templatePath, destPath); err != nil {
 		return err
 	}
-	return deployconf.Save(destPath, conf)
+	if err := deployconf.Save(destPath, conf); err != nil {
+		return err
+	}
+	// The deploy.conf is already on disk; a denylist write must not make
+	// the frontend treat this create as failed.
+	_ = forgetRemovedGame(opsDir, appName)
+	return nil
 }
 
 func (a *App) SaveDeployConf(opsDir, appName string, conf deployconf.DeployConf) error {
@@ -339,13 +383,27 @@ func (a *App) ListSSHKeys() ([]string, error) {
 // with a 422 at create time. region is optional — empty uses deploy.conf's
 // DROPLET_REGION, anything else checks that region instead.
 func (a *App) ListAvailableTiers(opsDir, appName, region string) ([]scriptrunner.TierOption, error) {
-	return scriptrunner.ListAvailableTiers(opsDir, appName, region)
+	if err := a.resolveDirs(); err != nil {
+		return nil, err
+	}
+	dataDir := opsDir
+	if dataDir == "" {
+		dataDir = a.dataDir
+	}
+	return scriptrunner.ListAvailableTiers(a.scriptDir, dataDir, appName, region)
 }
 
 // ListAvailableRegions returns the regions offering at least one price tier,
 // for the deploy panel's region override dropdown.
 func (a *App) ListAvailableRegions(opsDir, appName string) ([]scriptrunner.RegionOption, error) {
-	return scriptrunner.ListAvailableRegions(opsDir, appName)
+	if err := a.resolveDirs(); err != nil {
+		return nil, err
+	}
+	dataDir := opsDir
+	if dataDir == "" {
+		dataDir = a.dataDir
+	}
+	return scriptrunner.ListAvailableRegions(a.scriptDir, dataDir, appName)
 }
 
 // OpenURL opens rawURL in the operator's default browser — used for the
@@ -374,6 +432,14 @@ func (a *App) CheckStatus(appName string) (scriptrunner.StatusResult, error) {
 // progress and the final result arrive as "create:log" / "create:exit"
 // events (see scriptrunner.RunCreate).
 func (a *App) RunCreate(req scriptrunner.CreateRequest) {
+	if err := a.resolveDirs(); err != nil {
+		wailsEmitter{ctx: a.ctx}.EmitExit("create:exit", scriptrunner.ExitInfo{AppName: req.AppName, Code: -1, Err: err.Error()})
+		return
+	}
+	req.ScriptDir = a.scriptDir
+	if req.OpsDir == "" {
+		req.OpsDir = a.dataDir
+	}
 	go func() {
 		_ = scriptrunner.RunCreate(req, wailsEmitter{ctx: a.ctx})
 	}()
@@ -383,6 +449,14 @@ func (a *App) RunCreate(req scriptrunner.CreateRequest) {
 // progress and the final result arrive as "delete:log" / "delete:exit"
 // events (see scriptrunner.RunDelete).
 func (a *App) RunDelete(req scriptrunner.DeleteRequest) {
+	if err := a.resolveDirs(); err != nil {
+		wailsEmitter{ctx: a.ctx}.EmitExit("delete:exit", scriptrunner.ExitInfo{AppName: req.AppName, Code: -1, Err: err.Error()})
+		return
+	}
+	req.ScriptDir = a.scriptDir
+	if req.OpsDir == "" {
+		req.OpsDir = a.dataDir
+	}
 	go func() {
 		_ = scriptrunner.RunDelete(req, wailsEmitter{ctx: a.ctx})
 	}()
@@ -411,8 +485,8 @@ type UpdateInfo struct {
 
 // CheckForUpdate polls GitHub Releases for a newer gameshell-deploy-gui
 // build than appVersion. Available is false (no error) when already up to
-// date — which, until release-go-gui.yml stamps appVersion at build time
-// (see main.go), is always the case for a build produced by that workflow.
+// date. release-go-gui.yml stamps appVersion via -ldflags when
+// version_ldflag_package is passed (see auto-release.yml).
 func (a *App) CheckForUpdate() (UpdateInfo, error) {
 	info, err := kvgupdate.CheckForUpdate(updateRepo, updateAppName, appVersion)
 	if err != nil || info == nil {
@@ -421,11 +495,18 @@ func (a *App) CheckForUpdate() (UpdateInfo, error) {
 	return UpdateInfo{Available: true, Version: info.Version}, nil
 }
 
-// ApplyUpdate re-checks for an update, downloads and extracts it, then
-// replaces the running executable and relaunches. Does not return on
-// success; the frontend should treat a resolved promise here as "something
-// went wrong" (a real update never comes back to report success).
+// ApplyUpdate prefers the Windows Inno Setup installer (whole app payload:
+// exe + create.sh + delete.sh + templates), then the zip/tar fallback.
+// Zip fallback copies package files into the install dir except a
+// top-level games/ path, then replaces the exe. Does not return on success.
 func (a *App) ApplyUpdate() error {
+	applied, err := tryWindowsInstallerUpdate(updateRepo, updateAppName, appVersion)
+	if err != nil {
+		return err
+	}
+	if applied {
+		return nil
+	}
 	info, err := kvgupdate.CheckForUpdate(updateRepo, updateAppName, appVersion)
 	if err != nil {
 		return err
@@ -435,6 +516,9 @@ func (a *App) ApplyUpdate() error {
 	}
 	stagedDir, err := kvgupdate.DownloadAndExtract(info, updateAppName)
 	if err != nil {
+		return err
+	}
+	if err := copyStagedPayloadSkippingGames(stagedDir, updateAppName); err != nil {
 		return err
 	}
 	return kvgupdate.ApplyUpdateAndRestart(stagedDir, updateAppName) // does not return on success
