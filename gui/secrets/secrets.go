@@ -21,20 +21,29 @@ const (
 	extraPrefix      = "extra:"
 )
 
+// ExtraEnvVar is one extra secret. A slice rather than map[string]string
+// because Wails' generated TS models omit map fields, so maps never survive
+// the frontend → Go round-trip (the same reason scriptrunner.CreateRequest
+// uses a slice).
+type ExtraEnvVar struct {
+	Key   string `json:"key"`
+	Value string `json:"value"`
+}
+
 // Bundle is the set of secrets the Deploy/Teardown panels can remember.
 // ExtraEnv is keyed by the resolved env var name (e.g. TRACK_TIMELINE_YT_API_KEY).
 type Bundle struct {
-	SQLUser       string            `json:"sqlUser"`
-	SQLPassword   string            `json:"sqlPassword"`
-	GPGPassphrase string            `json:"gpgPassphrase"`
-	ExtraEnv      map[string]string `json:"extraEnv"`
+	SQLUser       string        `json:"sqlUser"`
+	SQLPassword   string        `json:"sqlPassword"`
+	GPGPassphrase string        `json:"gpgPassphrase"`
+	ExtraEnv      []ExtraEnvVar `json:"extraEnv"`
 }
 
 // Load reads stored secrets. Missing keyring items are empty strings, not
 // errors — first run, or a keyring that has never been written, is normal.
 // extraNames are the extra env var keys to look up for the current game.
 func Load(extraNames []string) (Bundle, error) {
-	b := Bundle{ExtraEnv: map[string]string{}}
+	b := Bundle{}
 	var err error
 	if b.SQLUser, err = get(keySQLUser); err != nil {
 		return Bundle{}, err
@@ -54,7 +63,7 @@ func Load(extraNames []string) (Bundle, error) {
 			return Bundle{}, err
 		}
 		if val != "" {
-			b.ExtraEnv[name] = val
+			b.ExtraEnv = append(b.ExtraEnv, ExtraEnvVar{Key: name, Value: val})
 		}
 	}
 	return b, nil
@@ -72,11 +81,11 @@ func Save(b Bundle) error {
 	if err := setIfNonEmpty(keyGPGPassphrase, b.GPGPassphrase); err != nil {
 		return err
 	}
-	for name, val := range b.ExtraEnv {
-		if !validExtraName(name) {
+	for _, ev := range b.ExtraEnv {
+		if !validExtraName(ev.Key) {
 			continue
 		}
-		if err := setIfNonEmpty(extraPrefix+name, val); err != nil {
+		if err := setIfNonEmpty(extraPrefix+ev.Key, ev.Value); err != nil {
 			return err
 		}
 	}
@@ -142,16 +151,17 @@ func validExtraName(name string) bool {
 }
 
 // FromEnv reads DEPLOY_SQL_USER / DEPLOY_SQL_PASSWORD / GPG_PASSPHRASE and
-// any extraNames from the environment (and on Windows, from WSL too). Empty
-// if unset — same names create.sh uses on the CLI.
+// any extraNames from the environment (and on Windows, the User-scope
+// environment then WSL too). Empty if unset — same names create.sh uses
+// on the CLI.
 func FromEnv(extraNames []string) Bundle {
-	b := Bundle{ExtraEnv: map[string]string{}}
+	b := Bundle{}
 	b.SQLUser = platform.LookupEnv("DEPLOY_SQL_USER")
 	b.SQLPassword = platform.LookupEnv("DEPLOY_SQL_PASSWORD")
 	b.GPGPassphrase = platform.LookupEnv("GPG_PASSPHRASE")
 	for _, name := range extraNames {
 		if v := platform.LookupEnv(name); v != "" {
-			b.ExtraEnv[name] = v
+			b.ExtraEnv = append(b.ExtraEnv, ExtraEnvVar{Key: name, Value: v})
 		}
 	}
 	return b
@@ -160,15 +170,7 @@ func FromEnv(extraNames []string) Bundle {
 // Merge prefers non-empty fields from preferred, filling gaps from fallback.
 func Merge(preferred, fallback Bundle) Bundle {
 	out := fallback
-	if out.ExtraEnv == nil {
-		out.ExtraEnv = map[string]string{}
-	} else {
-		copied := make(map[string]string, len(out.ExtraEnv))
-		for k, v := range out.ExtraEnv {
-			copied[k] = v
-		}
-		out.ExtraEnv = copied
-	}
+	out.ExtraEnv = append([]ExtraEnvVar(nil), fallback.ExtraEnv...)
 	if preferred.SQLUser != "" {
 		out.SQLUser = preferred.SQLUser
 	}
@@ -178,9 +180,19 @@ func Merge(preferred, fallback Bundle) Bundle {
 	if preferred.GPGPassphrase != "" {
 		out.GPGPassphrase = preferred.GPGPassphrase
 	}
-	for k, v := range preferred.ExtraEnv {
-		if v != "" {
-			out.ExtraEnv[k] = v
+	byKey := map[string]int{}
+	for i, ev := range out.ExtraEnv {
+		byKey[ev.Key] = i
+	}
+	for _, ev := range preferred.ExtraEnv {
+		if ev.Value == "" {
+			continue
+		}
+		if i, ok := byKey[ev.Key]; ok {
+			out.ExtraEnv[i] = ev
+		} else {
+			byKey[ev.Key] = len(out.ExtraEnv)
+			out.ExtraEnv = append(out.ExtraEnv, ev)
 		}
 	}
 	return out

@@ -10,6 +10,7 @@ import {
   saveSecrets,
   forgetSecrets,
   setRememberSecrets,
+  type ExtraEnvVar,
   type RegionOption,
   type TierOption,
 } from "./api";
@@ -150,9 +151,10 @@ export function createDeployPanel(): { el: HTMLElement; render: () => void } {
       if (!sqlUserInput.value) sqlUserInput.value = bundle.sqlUser ?? "";
       if (!sqlPasswordInput.value) sqlPasswordInput.value = bundle.sqlPassword ?? "";
       if (!gpgPassphraseInput.value) gpgPassphraseInput.value = bundle.gpgPassphrase ?? "";
-      const extras = bundle.extraEnv ?? {};
-      for (const [name, input] of extraEnvInputs) {
-        if (!input.value && extras[name]) input.value = extras[name];
+      const extras = bundle.extraEnv ?? [];
+      for (const ev of extras) {
+        const input = extraEnvInputs.get(ev.key);
+        if (input && !input.value && ev.value) input.value = ev.value;
       }
       void render();
     } catch {
@@ -269,9 +271,9 @@ export function createDeployPanel(): { el: HTMLElement; render: () => void } {
     const sqlUser = sqlUserInput.value;
     const sqlPassword = sqlPasswordInput.value;
     const gpgPassphrase = gpgPassphraseInput.value;
-    const extraEnv: Record<string, string> = {};
+    const extraEnv: ExtraEnvVar[] = [];
     for (const [name, input] of extraEnvInputs) {
-      extraEnv[name] = input.value;
+      extraEnv.push({ key: name, value: input.value });
     }
 
     if (rememberCheck.checked) {

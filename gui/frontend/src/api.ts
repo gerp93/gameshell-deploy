@@ -15,7 +15,7 @@ export interface SecretsBundle {
   sqlUser: string;
   sqlPassword: string;
   gpgPassphrase: string;
-  extraEnv: Record<string, string>;
+  extraEnv: ExtraEnvVar[];
 }
 
 export interface DeployConf {
@@ -83,6 +83,11 @@ export interface RegionOption {
   name: string;
 }
 
+export interface ExtraEnvVar {
+  key: string;
+  value: string;
+}
+
 export interface CreateRequest {
   opsDir: string;
   appName: string;
@@ -95,7 +100,7 @@ export interface CreateRequest {
   sqlUser: string;
   sqlPassword: string;
   gpgPassphrase: string;
-  extraEnv: Record<string, string>;
+  extraEnv: ExtraEnvVar[];
 }
 
 export interface DeleteRequest {

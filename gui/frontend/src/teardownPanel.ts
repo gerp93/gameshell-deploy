@@ -122,7 +122,7 @@ export function createTeardownPanel(): { el: HTMLElement; render: () => void } {
           sqlUser: "",
           sqlPassword: "",
           gpgPassphrase,
-          extraEnv: {},
+          extraEnv: [],
         });
       } catch {
         // Don't block teardown if the keychain write fails.

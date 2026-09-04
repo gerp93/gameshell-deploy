@@ -699,6 +699,9 @@ sed \
 # scalars so `#`, `:`, etc. in an API key don't get parsed as YAML.
 if [[ ${#EXTRA_ENV_RESOLVED[@]} -gt 0 ]]; then
 	echo "Injecting Extra Env Vars..."
+	for extra_key in "${EXTRA_ENV_RESOLVED[@]}"; do
+		echo "  $extra_key"
+	done
 	EXTRA_SPEC_PATH=$(mktemp)
 	# This tempfile holds API keys, same as APP_SPEC_PATH holds the SQL
 	# password — extend the EXIT trap rather than replacing it, so the

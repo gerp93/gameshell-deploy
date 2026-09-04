@@ -58,7 +58,8 @@ func OpenURL(rawURL string) error {
 }
 
 // LookupEnv returns the value of name from the process environment. On
-// Windows, if it isn't set on the host, it also checks the default WSL
+// Windows, if it isn't set on the process, it also checks the User-scope
+// environment (the same store run-dev.ps1 reads) and then the default WSL
 // distro (login shell), so exports in ~/.bashrc match CLI use of create.sh.
 // Names that aren't env-var identifiers return "".
 func LookupEnv(name string) string {

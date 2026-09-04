@@ -8,6 +8,8 @@ import (
 	"os/exec"
 	"strings"
 	"syscall"
+
+	"golang.org/x/sys/windows/registry"
 )
 
 const isWindows = true
@@ -93,6 +95,12 @@ func lookupEnv(name string) string {
 	if v := os.Getenv(name); v != "" {
 		return v
 	}
+	// User-scope vars (Settings → Environment variables) are not in this
+	// process if it was launched before they were set — same gap run-dev.ps1
+	// works around by reading the User scope directly.
+	if v := userEnv(name); v != "" {
+		return v
+	}
 	if !wslAvailable() {
 		return ""
 	}
@@ -104,6 +112,19 @@ func lookupEnv(name string) string {
 		return ""
 	}
 	return strings.TrimRight(string(out), "\r\n")
+}
+
+func userEnv(name string) string {
+	k, err := registry.OpenKey(registry.CURRENT_USER, `Environment`, registry.QUERY_VALUE)
+	if err != nil {
+		return ""
+	}
+	defer k.Close()
+	val, _, err := k.GetStringValue(name)
+	if err != nil {
+		return ""
+	}
+	return val
 }
 
 // openFolder runs directly on Windows (not through wsl.exe) since path is

@@ -6,6 +6,7 @@ require (
 	github.com/gerp93/KVG_Standards/packages/go/kvgupdate v0.0.0-20260807143939-e8d476dfc760
 	github.com/wailsapp/wails/v2 v2.13.0
 	github.com/zalando/go-keyring v0.2.8
+	golang.org/x/sys v0.44.0
 )
 
 require (
@@ -36,6 +37,5 @@ require (
 	github.com/wailsapp/mimetype v1.4.1 // indirect
 	golang.org/x/crypto v0.51.0 // indirect
 	golang.org/x/net v0.54.0 // indirect
-	golang.org/x/sys v0.44.0 // indirect
 	golang.org/x/text v0.37.0 // indirect
 )

@@ -7,8 +7,9 @@ new styles, formatters, or abstractions.
 ## What this is
 
 Shared deployment tooling for [gameshell-framework](https://github.com/gerp93/gameshell-framework)
-games (currently [card-judge](https://github.com/gerp93/card-judge) and
-[timeline-trivia](https://github.com/gerp93/timeline-trivia)). It is a
+games (currently [card-judge](https://github.com/gerp93/card-judge),
+[timeline-trivia](https://github.com/gerp93/timeline-trivia), and
+[track-timeline](https://github.com/gerp93/track-timeline)). It is a
 **control plane and artifact store**: you run its scripts from a checkout of
 this repo, passing an app name (`./create.sh APP_NAME`); config and backups
 for every game live in this repo too, under `games/APP_NAME/`. There is no

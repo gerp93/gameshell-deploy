@@ -44,6 +44,14 @@ type Emitter interface {
 	EmitExit(event string, info ExitInfo)
 }
 
+// ExtraEnvVar is one extra secret copied onto the DO app. A slice of these
+// rather than map[string]string: Wails' generated TS models omit map fields,
+// so a map extraEnv never survived the frontend → Go round-trip.
+type ExtraEnvVar struct {
+	Key   string `json:"key"`
+	Value string `json:"value"`
+}
+
 // CreateRequest mirrors create.sh's positional arg + flags.
 type CreateRequest struct {
 	OpsDir     string `json:"opsDir"`
@@ -60,7 +68,7 @@ type CreateRequest struct {
 	// ExtraEnv is KEY=value pairs listed (by name) in deploy.conf's
 	// EXTRA_ENV_VARS. Keys are the env var names copied onto the DO app;
 	// values come from the operator (never from deploy.conf).
-	ExtraEnv map[string]string `json:"extraEnv"`
+	ExtraEnv []ExtraEnvVar `json:"extraEnv"`
 }
 
 // DeleteRequest mirrors delete.sh's positional arg + flag. Backup is
@@ -105,8 +113,11 @@ func RunCreate(req CreateRequest, emit Emitter) error {
 	if req.GPGPassphrase != "" {
 		env = append(env, "GPG_PASSPHRASE="+req.GPGPassphrase)
 	}
-	for k, v := range req.ExtraEnv {
-		env = append(env, k+"="+v)
+	for _, ev := range req.ExtraEnv {
+		if ev.Key == "" {
+			continue
+		}
+		env = append(env, ev.Key+"="+ev.Value)
 	}
 	scriptPath := filepath.Join(req.OpsDir, "create.sh")
 	return run(req.AppName, req.OpsDir, scriptPath, args, env, "create", emit)
