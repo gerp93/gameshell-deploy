@@ -93,6 +93,15 @@ export function hasFailedExit(kind: RunKind, appName: string): boolean {
   return Boolean(!run.running && run.lastExit && run.lastExit.code !== 0);
 }
 
+// True when this session still has a create log buffered for the game —
+// used to keep the Deploy log on screen after a successful create, instead
+// of hiding the whole panel the instant isDeployed() flips to Teardown.
+export function hasCreateLog(appName: string): boolean {
+  if (!appName) return false;
+  const run = getGameRun("create", appName);
+  return run.lines.length > 0 || Boolean(run.lastExit);
+}
+
 // Which script, if any, is currently running for this game. A run in flight
 // outranks Digital Ocean's reported status when deciding which panel to
 // show: mid-deploy the droplet already exists while the app doesn't, so

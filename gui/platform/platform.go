@@ -69,6 +69,13 @@ func LookupEnv(name string) string {
 	return lookupEnv(name)
 }
 
+// ToScriptPath converts a host-native filesystem path into the path create.sh
+// will see — identity on Unix, `wslpath -a` on Windows. Used for tempfile
+// arguments that have to be readable inside WSL.
+func ToScriptPath(path string) (string, error) {
+	return toScriptPath(path)
+}
+
 func validEnvName(name string) bool {
 	if name == "" {
 		return false

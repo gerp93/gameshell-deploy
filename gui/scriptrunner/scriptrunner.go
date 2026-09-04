@@ -113,11 +113,20 @@ func RunCreate(req CreateRequest, emit Emitter) error {
 	if req.GPGPassphrase != "" {
 		env = append(env, "GPG_PASSPHRASE="+req.GPGPassphrase)
 	}
-	for _, ev := range req.ExtraEnv {
-		if ev.Key == "" {
-			continue
-		}
-		env = append(env, ev.Key+"="+ev.Value)
+	// Extra keys go into a YAML tempfile that create.sh cats into the spec,
+	// the same way SQL values land via sed — not as WSL `env KEY=VAL` argv.
+	// That's how YouTube/Claude keys were getting dropped while SQL still
+	// injected: DEPLOY_SQL_* are plain strings on this struct; a map extraEnv
+	// used to vanish in Wails TS, and even as a slice the values were a
+	// second lookup inside WSL that often wasn't set.
+	yamlHost, yamlScript, err := writeExtraEnvYAMLFile(req.ExtraEnv)
+	if err != nil {
+		emit.EmitExit("create:exit", ExitInfo{AppName: req.AppName, Code: -1, Err: err.Error()})
+		return err
+	}
+	if yamlHost != "" {
+		defer os.Remove(yamlHost)
+		env = append(env, "EXTRA_ENV_YAML_FILE="+yamlScript)
 	}
 	scriptPath := filepath.Join(req.OpsDir, "create.sh")
 	return run(req.AppName, req.OpsDir, scriptPath, args, env, "create", emit)

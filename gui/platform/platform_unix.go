@@ -51,3 +51,7 @@ func desktopOpener() string {
 func lookupEnv(name string) string {
 	return os.Getenv(name)
 }
+
+func toScriptPath(path string) (string, error) {
+	return path, nil
+}

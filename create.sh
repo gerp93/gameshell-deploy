@@ -50,11 +50,15 @@
 #                        interactive CLI use and gpg prompts as usual.
 #
 # Extra per-game secrets (API keys, etc.) are listed by NAME only in
-# deploy.conf's EXTRA_ENV_VARS and read from the environment at create
-# time — same rule as DEPLOY_SQL_*: values never live in a file. A
-# leading '+' concatenates ENV_VAR_PREFIX ("+YT_API_KEY" with prefix
-# TRACK_TIMELINE becomes TRACK_TIMELINE_YT_API_KEY); unmarked names
-# are injected as-is. Commas are treated as separators, same as spaces.
+# deploy.conf's EXTRA_ENV_VARS. CLI use reads the values from the
+# environment at create time (same as DEPLOY_SQL_*). The GUI writes those
+# values into EXTRA_ENV_YAML_FILE (a 0600 tempfile in the same YAML shape
+# as the SQL envs in templates/spec.yaml) so they don't have to survive a
+# WSL `env KEY=VAL` argv hop — that's how SQL always landed and extra keys
+# sometimes didn't. A leading '+' concatenates ENV_VAR_PREFIX
+# ("+YT_API_KEY" with prefix TRACK_TIMELINE becomes
+# TRACK_TIMELINE_YT_API_KEY); unmarked names are injected as-is. Commas
+# are treated as separators, same as spaces.
 ################################################################################
 
 set -e # exit on any command error
@@ -403,16 +407,34 @@ if [[ -n "${EXTRA_ENV_VARS// }" ]]; then
 			echo "Names must be alphanumeric-plus-underscore identifiers."
 			exit 1
 		fi
-		if [[ -z "${!extra_key}" ]]; then
-			echo "Environment variable not found: $extra_key"
-			echo "Set it in the environment (same as DEPLOY_SQL_USER/PASSWORD). deploy.conf lists the name only."
-			exit 1
-		fi
-		if [[ "${!extra_key}" == *$'\n'* || "${!extra_key}" == *$'\r'* ]]; then
-			echo "Environment variable $extra_key contains a newline; refusing to put it in the app spec."
-			exit 1
+		# When the GUI passes EXTRA_ENV_YAML_FILE, values live in that file
+		# rather than the environment — WSL `env KEY=VAL` argv is how API
+		# keys were getting dropped. CLI use still requires the env vars.
+		if [[ -z "${EXTRA_ENV_YAML_FILE:-}" ]]; then
+			if [[ -z "${!extra_key}" ]]; then
+				echo "Environment variable not found: $extra_key"
+				echo "Set it in the environment (same as DEPLOY_SQL_USER/PASSWORD). deploy.conf lists the name only."
+				exit 1
+			fi
+			if [[ "${!extra_key}" == *$'\n'* || "${!extra_key}" == *$'\r'* ]]; then
+				echo "Environment variable $extra_key contains a newline; refusing to put it in the app spec."
+				exit 1
+			fi
 		fi
 		EXTRA_ENV_RESOLVED+=("$extra_key")
+	done
+fi
+
+if [[ -n "${EXTRA_ENV_YAML_FILE:-}" ]]; then
+	if [[ ! -f "$EXTRA_ENV_YAML_FILE" ]]; then
+		echo "EXTRA_ENV_YAML_FILE not found: $EXTRA_ENV_YAML_FILE"
+		exit 1
+	fi
+	for extra_key in "${EXTRA_ENV_RESOLVED[@]}"; do
+		if ! grep -Eq "^  - key: ${extra_key}$" "$EXTRA_ENV_YAML_FILE"; then
+			echo "EXTRA_ENV_YAML_FILE is missing $extra_key"
+			exit 1
+		fi
 	done
 fi
 
@@ -616,37 +638,28 @@ echo "Droplet Created"
 
 ################################################################################
 # finish droplet setup
+#
+# setup.sh writes /root/.gameshell-setup-complete when MariaDB is up — it
+# does not poweroff. Waiting for Status=off in 1-minute chunks, then
+# powering the droplet back on, is what made this step take ~7 minutes on
+# top of `dnf upgrade`. Poll SSH for the sentinel every 15s instead.
+#
+# Arithmetic: `((n--))` when n hits 0 is a failing command under `set -e`
+# and aborted the timeout path instead of deleting the droplet. Use $(( )).
 
 echo "----------------------------------------"
 echo "Finishing Droplet Setup..."
 
-sleep 1m
-
-DONE_CHECKS_REMAINING=15
-while ! doctl compute droplet get "$DROPLET_ID" --format=Status --no-header | grep -q "off"; do
-	((DONE_CHECKS_REMAINING--))
-	if [ "$DONE_CHECKS_REMAINING" -eq 0 ]; then
+SETUP_CHECKS_REMAINING=40
+until ssh -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=no root@"$DROPLET_IP" "test -f /root/.gameshell-setup-complete"; do
+	SETUP_CHECKS_REMAINING=$((SETUP_CHECKS_REMAINING - 1))
+	if [ "$SETUP_CHECKS_REMAINING" -le 0 ]; then
 		echo "Droplet never finished setup, deleting droplet..."
 		doctl compute droplet delete "$DROPLET_ID" --force
 		echo "Droplet Deleted"
 		exit 1
 	fi
-	echo "Droplet setup not finished yet, waiting 1 minute..."
-	sleep 1m
-done
-
-doctl compute droplet-action power-on "$DROPLET_ID" --wait > /dev/null
-sleep 15s
-
-echo "Waiting for SSH to become available..."
-SSH_WAIT_REMAINING=20
-until ssh -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=no root@"$DROPLET_IP" true; do
-	((SSH_WAIT_REMAINING--))
-	if [ "$SSH_WAIT_REMAINING" -le 0 ]; then
-		echo "SSH did not become available within expected time."
-		exit 1
-	fi
-	echo "SSH not ready yet, waiting 15 seconds..."
+	echo "Droplet setup not finished yet, waiting 15 seconds..."
 	sleep 15s
 done
 
@@ -695,13 +708,26 @@ sed \
 # through sed: their values can contain `/` or `|` (the delimiters the
 # substitutions above use), and they aren't known at template-authoring
 # time. Inserted immediately before the service's `github:` block, which
-# follows `envs:` in templates/spec.yaml. Values are double-quoted YAML
+# follows `envs:` in templates/spec.yaml — same indent as the SQL envs
+# above it. Strip CR so a Windows checkout of spec.yaml still matches
+# `  github:` (CRLF is why SQL sed-substitutions always landed and extra
+# keys sometimes never got inserted). Values are double-quoted YAML
 # scalars so `#`, `:`, etc. in an API key don't get parsed as YAML.
-if [[ ${#EXTRA_ENV_RESOLVED[@]} -gt 0 ]]; then
+#
+# The GUI passes EXTRA_ENV_YAML_FILE (already in this YAML shape). CLI
+# still builds the same block from ${!extra_key}. Either way the keys end
+# up in the spec the same way SQL_HOST/USER/PASSWORD/DATABASE do.
+if [[ ${#EXTRA_ENV_RESOLVED[@]} -gt 0 || -n "${EXTRA_ENV_YAML_FILE:-}" ]]; then
 	echo "Injecting Extra Env Vars..."
-	for extra_key in "${EXTRA_ENV_RESOLVED[@]}"; do
-		echo "  $extra_key"
-	done
+	if [[ -n "${EXTRA_ENV_YAML_FILE:-}" ]]; then
+		while IFS= read -r extra_key; do
+			echo "  $extra_key"
+		done < <(grep -E '^  - key: ' "$EXTRA_ENV_YAML_FILE" | sed 's/^  - key: //')
+	else
+		for extra_key in "${EXTRA_ENV_RESOLVED[@]}"; do
+			echo "  $extra_key"
+		done
+	fi
 	EXTRA_SPEC_PATH=$(mktemp)
 	# This tempfile holds API keys, same as APP_SPEC_PATH holds the SQL
 	# password — extend the EXIT trap rather than replacing it, so the
@@ -713,13 +739,18 @@ if [[ ${#EXTRA_ENV_RESOLVED[@]} -gt 0 ]]; then
 	fi
 	INSERTED=0
 	while IFS= read -r line || [[ -n "$line" ]]; do
+		line="${line%$'\r'}"
 		if [[ $INSERTED -eq 0 && "$line" == "  github:" ]]; then
-			for extra_key in "${EXTRA_ENV_RESOLVED[@]}"; do
-				extra_val="${!extra_key}"
-				escaped=${extra_val//\\/\\\\}
-				escaped=${escaped//\"/\\\"}
-				printf '  - key: %s\n    scope: RUN_AND_BUILD_TIME\n    value: "%s"\n' "$extra_key" "$escaped"
-			done
+			if [[ -n "${EXTRA_ENV_YAML_FILE:-}" ]]; then
+				cat "$EXTRA_ENV_YAML_FILE"
+			else
+				for extra_key in "${EXTRA_ENV_RESOLVED[@]}"; do
+					extra_val="${!extra_key}"
+					escaped=${extra_val//\\/\\\\}
+					escaped=${escaped//\"/\\\"}
+					printf '  - key: %s\n    scope: RUN_AND_BUILD_TIME\n    value: "%s"\n' "$extra_key" "$escaped"
+				done
+			fi
 			INSERTED=1
 		fi
 		printf '%s\n' "$line"
@@ -729,7 +760,27 @@ if [[ ${#EXTRA_ENV_RESOLVED[@]} -gt 0 ]]; then
 		echo "Could not inject EXTRA_ENV_VARS: no '  github:' marker in the rendered app spec"
 		exit 1
 	fi
+	MISSING=0
+	for extra_key in "${EXTRA_ENV_RESOLVED[@]}"; do
+		if ! grep -q "key: ${extra_key}" "$APP_SPEC_PATH"; then
+			echo "App spec is missing $extra_key after extra-env injection."
+			MISSING=1
+		fi
+	done
+	if [[ -n "${EXTRA_ENV_YAML_FILE:-}" ]]; then
+		while IFS= read -r extra_key; do
+			if ! grep -q "key: ${extra_key}" "$APP_SPEC_PATH"; then
+				echo "App spec is missing $extra_key after extra-env injection."
+				MISSING=1
+			fi
+		done < <(grep -E '^  - key: ' "$EXTRA_ENV_YAML_FILE" | sed 's/^  - key: //')
+	fi
+	if [[ $MISSING -ne 0 ]]; then
+		exit 1
+	fi
 	echo "Extra Env Vars Injected"
+else
+	echo "No EXTRA_ENV_VARS in deploy.conf and no EXTRA_ENV_YAML_FILE — app spec will only contain SQL credentials."
 fi
 
 APP_URL=$(

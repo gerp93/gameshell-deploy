@@ -114,6 +114,10 @@ func lookupEnv(name string) string {
 	return strings.TrimRight(string(out), "\r\n")
 }
 
+func toScriptPath(path string) (string, error) {
+	return wslPathTranslate(path)
+}
+
 func userEnv(name string) string {
 	k, err := registry.OpenKey(registry.CURRENT_USER, `Environment`, registry.QUERY_VALUE)
 	if err != nil {

@@ -16,7 +16,7 @@ import {
 } from "./api";
 import { createLogPane } from "./logPane";
 import { refreshStatus, scheduleStatusReconcile } from "./appPanel";
-import { state, preflightPassed, isDeployed, isGameRunning, hasFailedExit, getGameRun, clearGameRun, notify } from "./state";
+import { state, preflightPassed, isDeployed, isGameRunning, hasFailedExit, hasCreateLog, getGameRun, clearGameRun, notify } from "./state";
 import { createRunSummary } from "./runSummary";
 import { resolveExtraEnvNames } from "./extraEnv";
 
@@ -500,37 +500,38 @@ export function createDeployPanel(): { el: HTMLElement; render: () => void } {
     // its own run.
     const running = isGameRunning("create", state.appName);
     const deleting = isGameRunning("delete", state.appName);
-    // A failed create that already made a droplet would otherwise hide this
-    // panel (isDeployed() becomes true) and swap to empty Teardown — keep
-    // the log visible so the operator can see why it died.
+    const deployed = isDeployed() === true;
+    const failedCreate = hasFailedExit("create", state.appName);
+    // Keep this panel (and its log) visible after a create finishes —
+    // otherwise isDeployed() hides the log and swaps to empty Teardown.
     const show =
       Boolean(state.appName) &&
       !deleting &&
-      (running || hasFailedExit("create", state.appName) || isDeployed() !== true);
+      (running || failedCreate || hasCreateLog(state.appName) || !deployed);
     el.style.display = show ? "" : "none";
     if (!show) return;
 
     logPane.showGame(state.appName);
     runSummary.render(state.appName, { running: "Deploying", done: "Deployed" });
     rebuildExtraEnvFields();
-    for (const part of formParts) part.style.display = running ? "none" : "";
+    const hideForm = running || (deployed && !failedCreate);
+    for (const part of formParts) part.style.display = hideForm ? "none" : "";
 
-    // Skip the availability checks entirely while a run is in flight — the
-    // form is hidden, and each check spawns its own script invocation.
-    if (!running && state.appName !== tiersLoadedForApp) {
+    // Skip the availability checks entirely while the form is hidden — a
+    // run in flight, or a finished create whose log we're still showing.
+    if (!hideForm && state.appName !== tiersLoadedForApp) {
       tiersLoadedForApp = state.appName;
       void refreshRegions().then(refreshTiers);
     }
     const ready = Boolean(state.deployConfFound && state.opsDir && preflightPassed());
     // Dims the whole panel (including the log) when the form is shown but
-    // not fillable yet — e.g. preflight failing. Not applied while running:
-    // formParts are already hidden then (see above), and there's no reason
-    // to grey out the log/summary the operator is actively watching just
-    // because the (hidden) form beneath it isn't ready.
-    el.dataset.disabled = !running && !ready ? "true" : "false";
+    // not fillable yet — e.g. preflight failing. Not applied while the form
+    // is hidden: there's no reason to grey out the log the operator is
+    // watching just because the (hidden) form beneath it isn't ready.
+    el.dataset.disabled = !hideForm && !ready ? "true" : "false";
     deployButton.disabled = !ready || running || !formFilled();
 
-    if (running) return; // the form (and this warning) is hidden anyway
+    if (hideForm) return;
     if (!state.deployConfFound) {
       backupWarning.textContent = "Fill in the Config tab before deploying.";
     } else if (!preflightPassed()) {
