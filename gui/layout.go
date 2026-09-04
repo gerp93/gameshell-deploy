@@ -1,10 +1,12 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 )
 
 // operatorDataDirName is the UserConfigDir folder for writable games/
@@ -12,6 +14,12 @@ import (
 // Windows setup.exe, or an extracted Linux/macOS archive). Git checkouts
 // keep games/ in the repo — do not move those into AppData.
 const operatorDataDirName = "gameshell-deploy"
+
+// removedGamesFile is a JSON list of game folder names the operator
+// deleted or renamed away. seedMissingGames will not recreate these from
+// the package seed — otherwise every restart would restore the catalog
+// names whose folders are gone.
+const removedGamesFile = "removed-games.json"
 
 func findScriptDir() (string, error) {
 	exe, err := os.Executable()
@@ -57,11 +65,16 @@ func operatorDataDir(scriptDir string) (string, error) {
 
 // seedMissingGames copies each game folder from scriptDir/seed/games or
 // scriptDir/games into dataDir/games only when that game's destination
-// folder does not already exist. Existing folders (backups, deploy.conf,
-// logs) are skipped entirely — never overwritten.
+// folder does not already exist and the operator has not deleted or
+// renamed it away. Existing folders (backups, deploy.conf, logs) are
+// skipped entirely — never overwritten.
 func seedMissingGames(scriptDir, dataDir string) error {
 	destRoot := filepath.Join(dataDir, "games")
 	if err := os.MkdirAll(destRoot, 0o755); err != nil {
+		return err
+	}
+	removed, err := loadRemovedGames(dataDir)
+	if err != nil {
 		return err
 	}
 	var sources []string
@@ -80,6 +93,9 @@ func seedMissingGames(scriptDir, dataDir string) error {
 			if !e.IsDir() {
 				continue
 			}
+			if _, skip := removed[e.Name()]; skip {
+				continue
+			}
 			dest := filepath.Join(destRoot, e.Name())
 			if _, err := os.Stat(dest); err == nil {
 				continue
@@ -90,6 +106,89 @@ func seedMissingGames(scriptDir, dataDir string) error {
 		}
 	}
 	return nil
+}
+
+func removedGamesPath(dataDir string) string {
+	return filepath.Join(dataDir, removedGamesFile)
+}
+
+func loadRemovedGames(dataDir string) (map[string]struct{}, error) {
+	out := map[string]struct{}{}
+	data, err := os.ReadFile(removedGamesPath(dataDir))
+	if os.IsNotExist(err) {
+		return out, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var names []string
+	if err := json.Unmarshal(data, &names); err != nil {
+		return nil, err
+	}
+	for _, name := range names {
+		if name != "" {
+			out[name] = struct{}{}
+		}
+	}
+	return out, nil
+}
+
+func saveRemovedGames(dataDir string, names map[string]struct{}) error {
+	list := make([]string, 0, len(names))
+	for name := range names {
+		list = append(list, name)
+	}
+	sort.Strings(list)
+	data, err := json.MarshalIndent(list, "", "  ")
+	if err != nil {
+		return err
+	}
+	data = append(data, '\n')
+	return os.WriteFile(removedGamesPath(dataDir), data, 0o644)
+}
+
+// rememberRemovedGame records that the operator deleted or renamed away
+// this game folder, so a later seed pass will not recreate it. Git
+// checkouts keep games/ in the repo and never seed, so this is a no-op
+// there — the file must not land in a working tree.
+func rememberRemovedGame(dataDir, name string) error {
+	if name == "" || isGitCheckout(dataDir) {
+		return nil
+	}
+	names, err := loadRemovedGames(dataDir)
+	if err != nil {
+		return err
+	}
+	if _, ok := names[name]; ok {
+		return nil
+	}
+	names[name] = struct{}{}
+	return saveRemovedGames(dataDir, names)
+}
+
+// forgetRemovedGame drops name from the denylist so a newly created or
+// renamed-to folder can be treated as a live game again (and so a later
+// DeleteGame re-records it cleanly).
+func forgetRemovedGame(dataDir, name string) error {
+	if name == "" || isGitCheckout(dataDir) {
+		return nil
+	}
+	names, err := loadRemovedGames(dataDir)
+	if err != nil {
+		return err
+	}
+	if _, ok := names[name]; !ok {
+		return nil
+	}
+	delete(names, name)
+	if len(names) == 0 {
+		err := os.Remove(removedGamesPath(dataDir))
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	return saveRemovedGames(dataDir, names)
 }
 
 func copyDirNoClobber(src, dst string) error {

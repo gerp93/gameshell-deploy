@@ -81,7 +81,7 @@ func (a *App) LoadSettings() (settings.Settings, error) {
 // behavior). From an installed app it's UserConfigDir/gameshell-deploy
 // (%APPDATA%\gameshell-deploy on Windows). Missing games are seeded from
 // scriptDir/seed/games or scriptDir/games only when that game folder does
-// not already exist — never overwritten.
+// not already exist and was not deleted or renamed away — never overwritten.
 func (a *App) GetOpsDir() (string, error) {
 	if err := a.resolveDirs(); err != nil {
 		return "", err
@@ -224,7 +224,8 @@ func (a *App) OpenBackupsFolder(opsDir, appName string) error {
 // droplet/app) is edited separately in the Config tab, so this is safe to do
 // without touching cloud resources. Still refuses while a droplet/app is
 // live, since scripts are invoked by folder name and moving it mid-life
-// makes the running deployment harder to find.
+// makes the running deployment harder to find. On an installed app the old
+// name is recorded so seedMissingGames will not recreate it on next launch.
 func (a *App) RenameGame(opsDir, oldName, newName string) error {
 	newName = strings.TrimSpace(newName)
 	if newName == "" {
@@ -258,13 +259,21 @@ func (a *App) RenameGame(opsDir, oldName, newName string) error {
 	if _, err := os.Stat(newPath); err == nil {
 		return fmt.Errorf("a game named %s already exists", newName)
 	}
-	return os.Rename(gameConfigDir(opsDir, oldName), newPath)
+	if err := rememberRemovedGame(opsDir, oldName); err != nil {
+		return err
+	}
+	if err := os.Rename(gameConfigDir(opsDir, oldName), newPath); err != nil {
+		return err
+	}
+	return forgetRemovedGame(opsDir, newName)
 }
 
 // DeleteGame permanently removes games/appName — its deploy.conf and any
 // locally stored backups — from disk. Refuses while Digital Ocean still
 // reports a live droplet/app for it: deleting the local config first would
-// destroy the only record of what still needs tearing down on DO.
+// destroy the only record of what still needs tearing down on DO. On an
+// installed app the name is recorded so the next launch will not recreate
+// the folder from the package seed.
 func (a *App) DeleteGame(opsDir, appName string) error {
 	confResult, err := a.LoadDeployConf(opsDir, appName)
 	if err != nil {
@@ -278,6 +287,9 @@ func (a *App) DeleteGame(opsDir, appName string) error {
 		if status.DropletExists || status.AppExists {
 			return fmt.Errorf("%s still has a droplet/app on Digital Ocean — tear it down first", appName)
 		}
+	}
+	if err := rememberRemovedGame(opsDir, appName); err != nil {
+		return err
 	}
 	return os.RemoveAll(gameConfigDir(opsDir, appName))
 }
@@ -322,7 +334,10 @@ func (a *App) CreateDeployConf(opsDir, appName string, conf deployconf.DeployCon
 	if err := deployconf.CreateFromTemplate(templatePath, destPath); err != nil {
 		return err
 	}
-	return deployconf.Save(destPath, conf)
+	if err := deployconf.Save(destPath, conf); err != nil {
+		return err
+	}
+	return forgetRemovedGame(opsDir, appName)
 }
 
 func (a *App) SaveDeployConf(opsDir, appName string, conf deployconf.DeployConf) error {
