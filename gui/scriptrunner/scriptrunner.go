@@ -10,6 +10,7 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
@@ -108,7 +109,7 @@ func RunCreate(req CreateRequest, emit Emitter) error {
 		env = append(env, k+"="+v)
 	}
 	scriptPath := filepath.Join(req.OpsDir, "create.sh")
-	return run(req.AppName, scriptPath, args, env, "create", emit)
+	return run(req.AppName, req.OpsDir, scriptPath, args, env, "create", emit)
 }
 
 // RunDelete runs delete.sh to completion, streaming output via emit under
@@ -123,7 +124,7 @@ func RunDelete(req DeleteRequest, emit Emitter) error {
 		env = append(env, "GPG_PASSPHRASE="+req.GPGPassphrase)
 	}
 	scriptPath := filepath.Join(req.OpsDir, "delete.sh")
-	return run(req.AppName, scriptPath, args, env, "delete", emit)
+	return run(req.AppName, req.OpsDir, scriptPath, args, env, "delete", emit)
 }
 
 // TierOption is one price tier create.sh's --list-tiers reported as
@@ -326,31 +327,57 @@ func Cancel(appName string) bool {
 	return true
 }
 
-func run(appName, scriptPath string, args []string, env []string, label string, emit Emitter) error {
+func run(appName, opsDir, scriptPath string, args []string, env []string, label string, emit Emitter) error {
 	if err := claim(appName); err != nil {
 		emit.EmitExit(label+":exit", ExitInfo{AppName: appName, Code: -1, Err: err.Error()})
 		return err
 	}
 	defer release(appName)
 
+	// Last-run log next to deploy.conf, so a failed create that flips the
+	// GUI to Teardown (droplet already exists) still has the script output
+	// on disk. Truncated each run; never holds env/secrets — only stdout/
+	// stderr lines create.sh/delete.sh already printed.
+	var logMu sync.Mutex
+	var logFile *os.File
+	if opsDir != "" {
+		logPath := filepath.Join(opsDir, "games", appName, "last-"+label+".log")
+		if f, err := os.Create(logPath); err == nil {
+			logFile = f
+			defer logFile.Close()
+		}
+	}
+	writeLog := func(stream, text string) {
+		if logFile == nil {
+			return
+		}
+		logMu.Lock()
+		defer logMu.Unlock()
+		_, _ = fmt.Fprintf(logFile, "[%s] %s\n", stream, text)
+	}
+
 	cmd, err := platform.ScriptCommand(scriptPath, args, env)
 	if err != nil {
+		writeLog("exit", err.Error())
 		emit.EmitExit(label+":exit", ExitInfo{AppName: appName, Code: -1, Err: err.Error()})
 		return err
 	}
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
+		writeLog("exit", err.Error())
 		emit.EmitExit(label+":exit", ExitInfo{AppName: appName, Code: -1, Err: err.Error()})
 		return err
 	}
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
+		writeLog("exit", err.Error())
 		emit.EmitExit(label+":exit", ExitInfo{AppName: appName, Code: -1, Err: err.Error()})
 		return err
 	}
 
 	if err := cmd.Start(); err != nil {
+		writeLog("exit", err.Error())
 		emit.EmitExit(label+":exit", ExitInfo{AppName: appName, Code: -1, Err: err.Error()})
 		return err
 	}
@@ -361,8 +388,8 @@ func run(appName, scriptPath string, args []string, env []string, label string, 
 
 	var wg sync.WaitGroup
 	wg.Add(2)
-	go streamLines(stdout, "stdout", appName, label, emit, &wg)
-	go streamLines(stderr, "stderr", appName, label, emit, &wg)
+	go streamLines(stdout, "stdout", appName, label, emit, writeLog, &wg)
+	go streamLines(stderr, "stderr", appName, label, emit, writeLog, &wg)
 	wg.Wait()
 
 	waitErr := cmd.Wait()
@@ -370,6 +397,11 @@ func run(appName, scriptPath string, args []string, env []string, label string, 
 	exitInfo := ExitInfo{AppName: appName, Code: cmd.ProcessState.ExitCode()}
 	if waitErr != nil {
 		exitInfo.Err = waitErr.Error()
+	}
+	if exitInfo.Err != "" {
+		writeLog("exit", fmt.Sprintf("code %d: %s", exitInfo.Code, exitInfo.Err))
+	} else {
+		writeLog("exit", fmt.Sprintf("code %d", exitInfo.Code))
 	}
 	emit.EmitExit(label+":exit", exitInfo)
 	return waitErr
@@ -394,11 +426,15 @@ func release(appName string) {
 	delete(runningCmds, appName)
 }
 
-func streamLines(r io.Reader, stream, appName, label string, emit Emitter, wg *sync.WaitGroup) {
+func streamLines(r io.Reader, stream, appName, label string, emit Emitter, writeLog func(stream, text string), wg *sync.WaitGroup) {
 	defer wg.Done()
 	scanner := bufio.NewScanner(r)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	for scanner.Scan() {
-		emit.EmitLog(label+":log", LogLine{AppName: appName, Stream: stream, Text: scanner.Text()})
+		text := scanner.Text()
+		if writeLog != nil {
+			writeLog(stream, text)
+		}
+		emit.EmitLog(label+":log", LogLine{AppName: appName, Stream: stream, Text: text})
 	}
 }

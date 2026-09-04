@@ -51,7 +51,10 @@ encrypts database backups at rest.
   `backups/` directory is git-ignored (`games/*/backups/` in
   `.gitignore`) — encrypted dumps included, not just decrypted `*.sql` —
   because backups are operator-local working data, not shared tooling.
-  Never commit a decrypted `*.sql` file regardless.
+  Never commit a decrypted `*.sql` file regardless. The GUI also writes
+  `games/APP_NAME/last-create.log` / `last-delete.log` (git-ignored) so a
+  failed deploy that leaves a droplet doesn't lose the script output when
+  the Action tab flips to Teardown.
 - **Secrets** come from the operator's environment, never from a file:
   `DEPLOY_SQL_USER` / `DEPLOY_SQL_PASSWORD` (used to create the MariaDB user
   on the droplet). Per-game secrets like `CARD_JUDGE_SQL_PASSWORD` are

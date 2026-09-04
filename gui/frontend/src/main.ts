@@ -9,7 +9,7 @@ import { createTabs } from "./tabs";
 import { createThemeSwitcher } from "./themeSwitcher";
 import { createSpinner } from "./spinner";
 import { initRunTracking } from "./runTracking";
-import { state, subscribe, isDeployed, runningKind } from "./state";
+import { state, subscribe, isDeployed, runningKind, hasFailedExit } from "./state";
 
 initRunTracking();
 
@@ -93,6 +93,9 @@ const tabs = createTabs(
         const kind = runningKind(state.appName);
         if (kind === "create") return "Deploying…";
         if (kind === "delete") return "Tearing down…";
+        // Failed create with leftover resources: stay on Deploy so the log
+        // is what you see, not an empty Teardown form.
+        if (hasFailedExit("create", state.appName)) return "Deploy";
         return isDeployed() === true ? "Teardown" : "Deploy";
       },
       el: actionTabContent,

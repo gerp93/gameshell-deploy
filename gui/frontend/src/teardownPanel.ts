@@ -1,12 +1,15 @@
 import { runDelete, loadSecrets, loadSettings, saveSecrets } from "./api";
 import { createLogPane } from "./logPane";
 import { refreshStatus, scheduleStatusReconcile } from "./appPanel";
-import { state, preflightPassed, isDeployed, isGameRunning, getGameRun, clearGameRun, notify } from "./state";
+import { state, preflightPassed, isDeployed, isGameRunning, hasFailedExit, getGameRun, clearGameRun, notify } from "./state";
 import { createRunSummary } from "./runSummary";
 
 export function createTeardownPanel(): { el: HTMLElement; render: () => void } {
   const el = document.createElement("div");
   el.innerHTML = `<p class="hint">Deletes the droplet and app for this game.</p>`;
+
+  const leftoverHint = document.createElement("p");
+  leftoverHint.className = "hint";
 
   const status = document.createElement("div");
   status.className = "status-line";
@@ -162,6 +165,7 @@ export function createTeardownPanel(): { el: HTMLElement; render: () => void } {
   ];
 
   el.append(
+    leftoverHint,
     backupLabelYes,
     backupLabelNo,
     gpgPassphraseWrap,
@@ -208,6 +212,11 @@ export function createTeardownPanel(): { el: HTMLElement; render: () => void } {
     if (!show) return;
 
     logPane.showGame(state.appName);
+    leftoverHint.textContent =
+      hasFailedExit("create", state.appName) && isDeployed() === true
+        ? "Deploy failed after creating cloud resources. The deploy log is above — teardown when you're ready to clean up."
+        : "";
+    leftoverHint.style.display = leftoverHint.textContent ? "" : "none";
     runSummary.render(state.appName, { running: "Tearing down", done: "Torn down" });
     for (const part of formParts) part.style.display = running ? "none" : "";
     if (!running) {

@@ -7,6 +7,11 @@
 games/*/backups/*
 !games/*/backups/.gitkeep
 
+# last create.sh/delete.sh output written by the GUI — operator-local, same
+# as backups: useful after a failed run, not shared tooling
+games/*/last-create.log
+games/*/last-delete.log
+
 # gui/ (Wails app) build artifacts and generated bindings
 gui/frontend/dist/
 gui/frontend/node_modules/
