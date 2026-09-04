@@ -147,6 +147,54 @@ func TestSeedMissingGamesSurvivesCorruptDenylist(t *testing.T) {
 	}
 }
 
+func TestSeedMissingGamesSurvivesUnreadableDenylist(t *testing.T) {
+	scriptDir := t.TempDir()
+	dataDir := t.TempDir()
+	mustWrite(t, filepath.Join(scriptDir, "seed", "games", "card-judge", "deploy.conf"), "SEED")
+	// A directory at the denylist path makes ReadFile fail with a
+	// non-parse error (IsNotExist is false). seed must still succeed.
+	if err := os.Mkdir(filepath.Join(dataDir, removedGamesFile), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := seedMissingGames(scriptDir, dataDir); err != nil {
+		t.Fatalf("unreadable denylist blocked seed: %v", err)
+	}
+	got, err := os.ReadFile(filepath.Join(dataDir, "games", "card-judge", "deploy.conf"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "SEED" {
+		t.Fatalf("missing game not seeded after unreadable denylist: %q", got)
+	}
+}
+
+func TestWriteFileAtomicReplacesExisting(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, removedGamesFile)
+	if err := writeFileAtomic(path, []byte("first\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeFileAtomic(path, []byte(`["card-judge"]`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != `["card-judge"]`+"\n" {
+		t.Fatalf("atomic replace left %q", got)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if filepath.Ext(e.Name()) == ".tmp" {
+			t.Fatalf("left temp file behind: %s", e.Name())
+		}
+	}
+}
+
 func TestForgetRemovedGameAllowsReseed(t *testing.T) {
 	scriptDir := t.TempDir()
 	dataDir := t.TempDir()

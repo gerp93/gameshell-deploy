@@ -73,9 +73,12 @@ func seedMissingGames(scriptDir, dataDir string) error {
 	if err := os.MkdirAll(destRoot, 0o755); err != nil {
 		return err
 	}
+	// A missing, truncated, or unreadable denylist must not fail
+	// operatorDataDir — that path is GetOpsDir, which the sidebar and
+	// Open data folder need. Treat any load error as "no names skipped".
 	removed, err := loadRemovedGames(dataDir)
 	if err != nil {
-		return err
+		removed = map[string]struct{}{}
 	}
 	var sources []string
 	for _, rel := range []string{filepath.Join("seed", "games"), "games"} {
@@ -123,8 +126,9 @@ func loadRemovedGames(dataDir string) (map[string]struct{}, error) {
 	}
 	var names []string
 	if err := json.Unmarshal(data, &names); err != nil {
-		// Truncated or corrupt file (WriteFile is not atomic) must not
-		// block resolving the data dir — treat as an empty denylist.
+		// Truncated or corrupt JSON must not block resolving the data
+		// dir — treat as an empty denylist. saveRemovedGames writes
+		// atomically, but a crash mid-write can still leave junk.
 		return out, nil
 	}
 	for _, name := range names {
@@ -146,7 +150,41 @@ func saveRemovedGames(dataDir string, names map[string]struct{}) error {
 		return err
 	}
 	data = append(data, '\n')
-	return os.WriteFile(removedGamesPath(dataDir), data, 0o644)
+	return writeFileAtomic(removedGamesPath(dataDir), data, 0o644)
+}
+
+func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(dir, "removed-games-*.tmp")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		_ = os.Remove(tmpName)
+		return err
+	}
+	if err := tmp.Chmod(perm); err != nil {
+		tmp.Close()
+		_ = os.Remove(tmpName)
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(tmpName)
+		return err
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		_ = os.Remove(path)
+		if err := os.Rename(tmpName, path); err != nil {
+			_ = os.Remove(tmpName)
+			return err
+		}
+	}
+	return nil
 }
 
 // rememberRemovedGame records that the operator deleted or renamed away

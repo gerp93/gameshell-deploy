@@ -290,10 +290,11 @@ func (a *App) DeleteGame(opsDir, appName string) error {
 			return fmt.Errorf("%s still has a droplet/app on Digital Ocean — tear it down first", appName)
 		}
 	}
-	if err := rememberRemovedGame(opsDir, appName); err != nil {
+	if err := os.RemoveAll(gameConfigDir(opsDir, appName)); err != nil {
 		return err
 	}
-	return os.RemoveAll(gameConfigDir(opsDir, appName))
+	_ = rememberRemovedGame(opsDir, appName)
+	return nil
 }
 
 // --- deploy.conf editor ---------------------------------------------------
