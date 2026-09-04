@@ -113,3 +113,13 @@ export UNPREFIXED_KEY=...
 - Version numbers are tracked per game (each repo keeps its own
   `version_bump.sh` and README version line) — versioning is intentionally not
   centralized here.
+
+## Standards
+
+This repo (including the `gui/` desktop app — see [gui/README.md](gui/README.md))
+follows the shared conventions in
+[gerp93/KVG_Standards](https://github.com/gerp93/KVG_Standards): theming,
+release/CI, self-update, and licensing all defer to that repo as the source
+of truth. See its `README.md` for the full catalog and this repo's own
+[TODO.md](TODO.md) for the product backlog (as opposed to standards
+compliance, which is tracked in KVG_Standards' `REPO_SCOPE.md`).

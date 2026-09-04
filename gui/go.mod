@@ -3,6 +3,7 @@ module gameshell-deploy-gui
 go 1.25.0
 
 require (
+	github.com/gerp93/KVG_Standards/packages/go/kvgupdate v0.0.0-20260807143939-e8d476dfc760
 	github.com/wailsapp/wails/v2 v2.13.0
 	github.com/zalando/go-keyring v0.2.8
 )

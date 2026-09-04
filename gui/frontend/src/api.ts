@@ -66,6 +66,11 @@ export interface StatusResult {
   appURL: string;
 }
 
+export interface UpdateInfo {
+  available: boolean;
+  version: string;
+}
+
 export interface TierOption {
   number: number;
   slug: string;
@@ -135,6 +140,11 @@ export const checkStatus = (appName: string): Promise<StatusResult> => Backend.C
 export const runCreate = (req: CreateRequest): Promise<void> => Backend.RunCreate(req);
 export const runDelete = (req: DeleteRequest): Promise<void> => Backend.RunDelete(req);
 export const cancelRun = (appName: string): Promise<boolean> => Backend.CancelRun(appName);
+
+// See app.go's CheckForUpdate/ApplyUpdate — this path is not yet verified
+// end-to-end against a real tagged release.
+export const checkForUpdate = (): Promise<UpdateInfo> => Backend.CheckForUpdate();
+export const applyUpdate = (): Promise<void> => Backend.ApplyUpdate();
 
 export function onLog(event: "create:log" | "delete:log", handler: (line: LogLine) => void): void {
   EventsOn(event, handler);
