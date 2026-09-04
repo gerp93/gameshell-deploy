@@ -126,7 +126,7 @@ func Save(path string, conf DeployConf) error {
 		key, _, ok := parseLine(line)
 		if ok {
 			if fl := fieldByKey(key); fl != nil {
-				line = key + "=" + *fl.get(&conf)
+				line = key + "=" + writeValue(*fl.get(&conf))
 				seen[key] = true
 			}
 		}
@@ -143,7 +143,7 @@ func Save(path string, conf DeployConf) error {
 			continue
 		}
 		if v := *fl.get(&conf); v != "" {
-			out = append(out, fl.key+"="+v)
+			out = append(out, fl.key+"="+writeValue(v))
 		}
 	}
 
@@ -161,7 +161,40 @@ func parseLine(line string) (key, value string, ok bool) {
 	if idx < 0 {
 		return "", "", false
 	}
-	return strings.TrimSpace(trimmed[:idx]), strings.TrimSpace(trimmed[idx+1:]), true
+	return strings.TrimSpace(trimmed[:idx]), unquoteValue(strings.TrimSpace(trimmed[idx+1:])), true
+}
+
+// writeValue quotes a deploy.conf value when `source` would otherwise split
+// it. Unquoted EXTRA_ENV_VARS=+A +B is parsed as EXTRA_ENV_VARS=+A and then
+// a command named +B ("command not found").
+func writeValue(v string) string {
+	if v == "" || !strings.ContainsAny(v, " \t#'\"$`\\") {
+		return v
+	}
+	escaped := strings.ReplaceAll(v, `\`, `\\`)
+	escaped = strings.ReplaceAll(escaped, `"`, `\"`)
+	escaped = strings.ReplaceAll(escaped, `$`, `\$`)
+	escaped = strings.ReplaceAll(escaped, "`", "\\`")
+	return `"` + escaped + `"`
+}
+
+func unquoteValue(v string) string {
+	n := len(v)
+	if n < 2 {
+		return v
+	}
+	if v[0] == '"' && v[n-1] == '"' {
+		inner := v[1 : n-1]
+		inner = strings.ReplaceAll(inner, `\"`, `"`)
+		inner = strings.ReplaceAll(inner, `\$`, `$`)
+		inner = strings.ReplaceAll(inner, "\\`", "`")
+		inner = strings.ReplaceAll(inner, `\\`, `\`)
+		return inner
+	}
+	if v[0] == '\'' && v[n-1] == '\'' {
+		return v[1 : n-1]
+	}
+	return v
 }
 
 var gitRepoPattern = regexp.MustCompile(`^[\w.-]+/[\w.-]+$`)

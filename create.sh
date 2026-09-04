@@ -170,6 +170,13 @@ if [ ! -f "$CONFIG_PATH" ]; then
 	echo "Config not found: $CONFIG_PATH"
 	exit 1
 fi
+# Unquoted EXTRA_ENV_VARS=+A +B is sourced as EXTRA_ENV_VARS=+A and then a
+# command named +B. Catch that before source so it isn't "command not found".
+if grep -Eq '^[[:space:]]*EXTRA_ENV_VARS=[^"'\''#].*[[:space:]]' "$CONFIG_PATH"; then
+	echo "EXTRA_ENV_VARS in $CONFIG_PATH contains spaces but isn't quoted."
+	echo "Use EXTRA_ENV_VARS=\"+NAME +OTHER\" or commas: EXTRA_ENV_VARS=+NAME,+OTHER"
+	exit 1
+fi
 # shellcheck disable=SC1090
 source "$CONFIG_PATH"
 

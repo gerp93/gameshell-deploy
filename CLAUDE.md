@@ -43,7 +43,9 @@ encrypts database backups at rest.
   operator's environment onto the DO app — never the values themselves. A
   leading `+` concatenates `ENV_VAR_PREFIX` (`+YT_API_KEY` with prefix
   `TRACK_TIMELINE` becomes `TRACK_TIMELINE_YT_API_KEY`); unmarked names are
-  injected as-is.
+  injected as-is. Space-separated lists must be quoted
+  (`EXTRA_ENV_VARS="+A +B"`) so `source` does not treat later names as
+  commands; commas (`+A,+B`) do not need quotes. The GUI quotes on save.
 - **Data** (this repo, per-game, git-ignored): `games/APP_NAME/backups/`, a
   directory of GPG-encrypted database dumps (`*.sql.gpg`). The whole
   `backups/` directory is git-ignored (`games/*/backups/` in

@@ -94,7 +94,7 @@ injected as-is:
 
 ```bash
 # in games/my-game/deploy.conf (names only, safe to commit)
-EXTRA_ENV_VARS=+OPENAI_API_KEY +OTHER_SECRET UNPREFIXED_KEY
+EXTRA_ENV_VARS="+OPENAI_API_KEY +OTHER_SECRET UNPREFIXED_KEY"
 
 # in the operator's environment (values, never a file)
 export MY_GAME_OPENAI_API_KEY=...
