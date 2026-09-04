@@ -562,45 +562,61 @@ fi
 # get ssh key
 
 echo "----------------------------------------"
-if [[ -n "$SSH_KEY_NAME_FLAG" ]]; then
-	SSH_KEY_NAME="$SSH_KEY_NAME_FLAG"
-	echo "SSH Key Name: $SSH_KEY_NAME (from --ssh-key)"
-else
-	echo "Which of the following SSH Keys should have access to the database droplet?"
-	doctl compute ssh-key list --format=Name --no-header
-	read -p "SSH Key Name: " SSH_KEY_NAME
-fi
-if [[ -z "$SSH_KEY_NAME" ]]; then
-	echo "SSH Key Name not provided"
-	exit 1
-fi
+# Loops only when SSH_KEY_NAME_FLAG is unset (interactive CLI use, no
+# --ssh-key) — an ambiguous/unknown name there re-prompts instead of just
+# failing. --ssh-key is how the GUI drives this, non-interactively with no
+# TTY to prompt on, so that path still exits on the first bad name; never
+# add a retry loop that also fires when SSH_KEY_NAME_FLAG is set, or a GUI
+# run would hang waiting on stdin that never comes.
+while true; do
+	if [[ -n "$SSH_KEY_NAME_FLAG" ]]; then
+		SSH_KEY_NAME="$SSH_KEY_NAME_FLAG"
+		echo "SSH Key Name: $SSH_KEY_NAME (from --ssh-key)"
+	else
+		echo "Which of the following SSH Keys should have access to the database droplet?"
+		doctl compute ssh-key list --format=Name --no-header
+		read -p "SSH Key Name: " SSH_KEY_NAME
+	fi
+	if [[ -z "$SSH_KEY_NAME" ]]; then
+		echo "SSH Key Name not provided"
+		exit 1
+	fi
 
-# grep -c exits 1 (a "failure" under set -e) when it counts zero matches,
-# even though it prints "0" correctly — every grep -c here is `|| true`'d so
-# a zero count is reported, not treated as a script-aborting error.
-SSH_KEY_MATCHES=$(doctl compute ssh-key list --format=ID,Name --no-header | grep "$SSH_KEY_NAME" || true)
-SSH_KEY_MATCH_COUNT=$(printf '%s\n' "$SSH_KEY_MATCHES" | grep -c '.' || true)
-if [[ "$SSH_KEY_MATCH_COUNT" -eq 0 ]]; then
-	echo "SSH Key ID not found"
-	exit 1
-elif [[ "$SSH_KEY_MATCH_COUNT" -eq 1 ]]; then
-	SSH_KEY_ID=$(printf '%s\n' "$SSH_KEY_MATCHES" | cut -d ' ' -f 1)
-else
+	# grep -c exits 1 (a "failure" under set -e) when it counts zero matches,
+	# even though it prints "0" correctly — every grep -c here is `|| true`'d
+	# so a zero count is reported, not treated as a script-aborting error.
+	SSH_KEY_MATCHES=$(doctl compute ssh-key list --format=ID,Name --no-header | grep "$SSH_KEY_NAME" || true)
+	SSH_KEY_MATCH_COUNT=$(printf '%s\n' "$SSH_KEY_MATCHES" | grep -c '.' || true)
+	if [[ "$SSH_KEY_MATCH_COUNT" -eq 0 ]]; then
+		echo "SSH Key ID not found"
+		[[ -n "$SSH_KEY_NAME_FLAG" ]] && exit 1
+		continue
+	elif [[ "$SSH_KEY_MATCH_COUNT" -eq 1 ]]; then
+		SSH_KEY_ID=$(printf '%s\n' "$SSH_KEY_MATCHES" | cut -d ' ' -f 1)
+		break
+	fi
+
 	# SSH_KEY_NAME matched more than one key as a substring (e.g. "foo" also
 	# matching "foo-bar") — only proceed if exactly one match is the exact
 	# name typed. Otherwise SSH_KEY_ID would end up holding multiple IDs
-	# glued together across a newline, which silently corrupts
-	# --ssh-keys on droplet create below and can leave the droplet with no
-	# usable SSH key attached at all.
+	# glued together across a newline, which silently corrupts --ssh-keys
+	# on droplet create below and can leave the droplet with no usable SSH
+	# key attached at all.
 	SSH_KEY_EXACT=$(printf '%s\n' "$SSH_KEY_MATCHES" | awk -v name="$SSH_KEY_NAME" '$2 == name')
 	SSH_KEY_EXACT_COUNT=$(printf '%s\n' "$SSH_KEY_EXACT" | grep -c '.' || true)
-	if [[ "$SSH_KEY_EXACT_COUNT" -ne 1 ]]; then
-		echo "\"$SSH_KEY_NAME\" matches more than one SSH key — be more specific:"
-		printf '%s\n' "$SSH_KEY_MATCHES"
+	if [[ "$SSH_KEY_EXACT_COUNT" -eq 1 ]]; then
+		SSH_KEY_ID=$(printf '%s\n' "$SSH_KEY_EXACT" | cut -d ' ' -f 1)
+		break
+	fi
+
+	echo "\"$SSH_KEY_NAME\" matches more than one SSH key:"
+	printf '%s\n' "$SSH_KEY_MATCHES"
+	if [[ -n "$SSH_KEY_NAME_FLAG" ]]; then
+		echo "Be more specific with --ssh-key."
 		exit 1
 	fi
-	SSH_KEY_ID=$(printf '%s\n' "$SSH_KEY_EXACT" | cut -d ' ' -f 1)
-fi
+	echo "Type one of the names above exactly."
+done
 
 ################################################################################
 # create droplet
