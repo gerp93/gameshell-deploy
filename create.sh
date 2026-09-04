@@ -639,10 +639,12 @@ echo "Droplet Created"
 ################################################################################
 # finish droplet setup
 #
-# setup.sh writes /root/.gameshell-setup-complete when MariaDB is up — it
-# does not poweroff. Waiting for Status=off in 1-minute chunks, then
-# powering the droplet back on, is what made this step take ~7 minutes on
-# top of `dnf upgrade`. Poll SSH for the sentinel every 15s instead.
+# setup.sh touches /root/.gameshell-setup-complete once MariaDB is up.
+# Poll for it over SSH rather than watching for the droplet to power itself
+# off and back on — same "provisioning is truly done" signal (SSH can come
+# up before the long `dnf upgrade` finishes, so SSH reachability alone
+# isn't enough), without the poweroff/power-on round trip that used to add
+# several minutes on top of an already-slow upgrade.
 #
 # Arithmetic: `((n--))` when n hits 0 is a failing command under `set -e`
 # and aborted the timeout path instead of deleting the droplet. Use $(( )).

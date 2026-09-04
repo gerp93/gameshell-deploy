@@ -1,19 +1,8 @@
 #!/bin/bash
-set -e
 
-# Don't `dnf upgrade --refresh` the whole image. On centos-stream that
-# pulls hundreds of packages and is what made droplet setup take ~7 minutes
-# before MariaDB even started installing. The DigitalOcean image is current
-# enough to install mariadb-server.
-#
-# Don't poweroff when done either. create.sh used to wait for Status=off in
-# 1-minute polls, then power the droplet back on — a full reboot after the
-# already-slow upgrade. A sentinel file is the done signal instead.
-
-if dnf module enable mariadb:10.11 -y; then
-	:
-fi
-dnf install -y mariadb-server
+dnf upgrade --refresh -y
+dnf module enable mariadb:10.11 -y
+dnf install mariadb-server -y
 
 systemctl enable mariadb.service --now
 

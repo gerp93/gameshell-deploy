@@ -411,8 +411,7 @@ type UpdateInfo struct {
 
 // CheckForUpdate polls GitHub Releases for a newer gameshell-deploy-gui
 // build than appVersion. Available is false (no error) when already up to
-// date — which, until release-go-gui.yml stamps appVersion at build time
-// (see main.go), is always the case for a build produced by that workflow.
+// date.
 func (a *App) CheckForUpdate() (UpdateInfo, error) {
 	info, err := kvgupdate.CheckForUpdate(updateRepo, updateAppName, appVersion)
 	if err != nil || info == nil {
@@ -421,10 +420,13 @@ func (a *App) CheckForUpdate() (UpdateInfo, error) {
 	return UpdateInfo{Available: true, Version: info.Version}, nil
 }
 
-// ApplyUpdate re-checks for an update, downloads and extracts it, then
-// replaces the running executable and relaunches. Does not return on
-// success; the frontend should treat a resolved promise here as "something
-// went wrong" (a real update never comes back to report success).
+// ApplyUpdate re-checks for an update, downloads and extracts it, then syncs
+// the whole staged package (create.sh, delete.sh, templates/, etc. — not
+// just the binary) into this checkout's OpsDir, leaving games/ (operator
+// config/backups) untouched, before replacing the running executable and
+// relaunching. Does not return on success; the frontend should treat a
+// resolved promise here as "something went wrong" (a real update never
+// comes back to report success).
 func (a *App) ApplyUpdate() error {
 	info, err := kvgupdate.CheckForUpdate(updateRepo, updateAppName, appVersion)
 	if err != nil {
@@ -433,9 +435,13 @@ func (a *App) ApplyUpdate() error {
 	if info == nil {
 		return fmt.Errorf("no update available")
 	}
+	opsDir, err := a.GetOpsDir()
+	if err != nil {
+		return err
+	}
 	stagedDir, err := kvgupdate.DownloadAndExtract(info, updateAppName)
 	if err != nil {
 		return err
 	}
-	return kvgupdate.ApplyUpdateAndRestart(stagedDir, updateAppName) // does not return on success
+	return kvgupdate.ApplyUpdateAndRestart(stagedDir, updateAppName, opsDir, []string{"games"}) // does not return on success
 }
