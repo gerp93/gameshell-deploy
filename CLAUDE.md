@@ -29,7 +29,9 @@ into `%LOCALAPPDATA%\Programs\gameshell-deploy-gui`. Operator data
 (`games/`, backups, last-run logs) lives in `%APPDATA%\gameshell-deploy` and is
 never overwritten by the installer or by Check for Updates. `{app}` has no live
 `games/` folder; seed `deploy.conf` files are at `{app}\seed\games` and are
-copied into the data dir only when that game folder does not already exist.
+copied into the data dir only when that game folder does not already exist
+(deleted or renamed names are listed in `removed-games.json` so they are
+not resurrected on the next launch).
 A git checkout of this repo keeps today's layout (scripts and games in the
 repo) — do not move a checkout's games into AppData. The GUI always passes
 `GAMESHELL_DATA_DIR` so `create.sh`/`delete.sh` read and write that data dir.
