@@ -87,11 +87,18 @@ export function createTeardownPanel(): { el: HTMLElement; render: () => void } {
       // failure (partial/unknown state) needs a real re-check.
       if (info.code === 0) {
         state.status = { dropletExists: false, appExists: false, appURL: "" };
-        // Whatever deploy history existed for this game was for the
-        // deployment that just got torn down — a successful teardown makes
-        // it stale, and leaving it in place is what made switching to
-        // Deploy right after tearing down show an unrelated old run.
-        clearGameRun("create", info.appName);
+        // A *successful* prior deploy's history is now stale — leaving it in
+        // place is what made switching to Deploy right after tearing down a
+        // healthy game show an unrelated old run. A *failed* deploy's record
+        // is kept, though: that's the operator tearing down cloud resources
+        // left over from a failure, and clearing it here would silently
+        // erase the only evidence it happened, along with the log showing
+        // why. See deployPanel.ts's "Start New Deploy" button, which is the
+        // explicit action that clears it once the operator is ready to move
+        // on.
+        if (!hasFailedExit("create", info.appName)) {
+          clearGameRun("create", info.appName);
+        }
       } else {
         await refreshStatus();
       }

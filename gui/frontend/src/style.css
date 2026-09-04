@@ -455,6 +455,11 @@ button.secondary:hover:not(:disabled) {
   color: var(--fail);
 }
 
+.log-pane-header {
+  display: flex;
+  justify-content: flex-end;
+}
+
 /* Deliberately theme-independent: a terminal-style log stays readable
    dark-on-light regardless of which Visual Assault palette is active. */
 .log-pane {
