@@ -13,4 +13,4 @@ mariadb -e "SET PASSWORD FOR 'REPLACE_SQL_USER'@'%' = PASSWORD('REPLACE_SQL_PASS
 mariadb -e "FLUSH PRIVILEGES;"
 mariadb -e "CREATE DATABASE REPLACE_DB_NAME CHARACTER SET = 'UTF8MB4' COLLATE = 'UTF8MB4_UNICODE_CI';"
 
-systemctl poweroff
+touch /root/.gameshell-setup-complete

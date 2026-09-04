@@ -639,39 +639,29 @@ echo "Droplet Created"
 ################################################################################
 # finish droplet setup
 #
+# setup.sh touches /root/.gameshell-setup-complete once MariaDB is up.
+# Poll for it over SSH rather than watching for the droplet to power itself
+# off and back on — same "provisioning is truly done" signal (SSH can come
+# up before the long `dnf upgrade` finishes, so SSH reachability alone
+# isn't enough), without the poweroff/power-on round trip that used to add
+# several minutes on top of an already-slow upgrade.
+#
 # Arithmetic: `((n--))` when n hits 0 is a failing command under `set -e`
 # and aborted the timeout path instead of deleting the droplet. Use $(( )).
 
 echo "----------------------------------------"
 echo "Finishing Droplet Setup..."
 
-sleep 1m
-
-DONE_CHECKS_REMAINING=15
-while ! doctl compute droplet get "$DROPLET_ID" --format=Status --no-header | grep -q "off"; do
-	DONE_CHECKS_REMAINING=$((DONE_CHECKS_REMAINING - 1))
-	if [ "$DONE_CHECKS_REMAINING" -eq 0 ]; then
+SETUP_CHECKS_REMAINING=40
+until ssh -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=no root@"$DROPLET_IP" "test -f /root/.gameshell-setup-complete"; do
+	SETUP_CHECKS_REMAINING=$((SETUP_CHECKS_REMAINING - 1))
+	if [ "$SETUP_CHECKS_REMAINING" -le 0 ]; then
 		echo "Droplet never finished setup, deleting droplet..."
 		doctl compute droplet delete "$DROPLET_ID" --force
 		echo "Droplet Deleted"
 		exit 1
 	fi
-	echo "Droplet setup not finished yet, waiting 1 minute..."
-	sleep 1m
-done
-
-doctl compute droplet-action power-on "$DROPLET_ID" --wait > /dev/null
-sleep 15s
-
-echo "Waiting for SSH to become available..."
-SSH_WAIT_REMAINING=20
-until ssh -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=no root@"$DROPLET_IP" true; do
-	SSH_WAIT_REMAINING=$((SSH_WAIT_REMAINING - 1))
-	if [ "$SSH_WAIT_REMAINING" -le 0 ]; then
-		echo "SSH did not become available within expected time."
-		exit 1
-	fi
-	echo "SSH not ready yet, waiting 15 seconds..."
+	echo "Droplet setup not finished yet, waiting 15 seconds..."
 	sleep 15s
 done
 
