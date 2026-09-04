@@ -259,13 +259,15 @@ func (a *App) RenameGame(opsDir, oldName, newName string) error {
 	if _, err := os.Stat(newPath); err == nil {
 		return fmt.Errorf("a game named %s already exists", newName)
 	}
-	if err := rememberRemovedGame(opsDir, oldName); err != nil {
-		return err
-	}
 	if err := os.Rename(gameConfigDir(opsDir, oldName), newPath); err != nil {
 		return err
 	}
-	return forgetRemovedGame(opsDir, newName)
+	// Record the move only after it succeeded so a failed rename does not
+	// denylist the original name. Bookkeeping errors must not hide the
+	// completed rename from the frontend (the folder is already at newName).
+	_ = rememberRemovedGame(opsDir, oldName)
+	_ = forgetRemovedGame(opsDir, newName)
+	return nil
 }
 
 // DeleteGame permanently removes games/appName — its deploy.conf and any
@@ -337,7 +339,10 @@ func (a *App) CreateDeployConf(opsDir, appName string, conf deployconf.DeployCon
 	if err := deployconf.Save(destPath, conf); err != nil {
 		return err
 	}
-	return forgetRemovedGame(opsDir, appName)
+	// The deploy.conf is already on disk; a denylist write must not make
+	// the frontend treat this create as failed.
+	_ = forgetRemovedGame(opsDir, appName)
+	return nil
 }
 
 func (a *App) SaveDeployConf(opsDir, appName string, conf deployconf.DeployConf) error {

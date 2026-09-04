@@ -123,7 +123,9 @@ func loadRemovedGames(dataDir string) (map[string]struct{}, error) {
 	}
 	var names []string
 	if err := json.Unmarshal(data, &names); err != nil {
-		return nil, err
+		// Truncated or corrupt file (WriteFile is not atomic) must not
+		// block resolving the data dir — treat as an empty denylist.
+		return out, nil
 	}
 	for _, name := range names {
 		if name != "" {

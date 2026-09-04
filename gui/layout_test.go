@@ -103,6 +103,50 @@ func TestSeedMissingGamesSkipsRemovedGames(t *testing.T) {
 	}
 }
 
+func TestLoadRemovedGamesIgnoresCorruptFile(t *testing.T) {
+	dataDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dataDir, removedGamesFile), []byte(""), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := loadRemovedGames(dataDir)
+	if err != nil {
+		t.Fatalf("empty denylist file blocked load: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("corrupt denylist: got %v, want empty", got)
+	}
+
+	if err := os.WriteFile(filepath.Join(dataDir, removedGamesFile), []byte(`["card-ju`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err = loadRemovedGames(dataDir)
+	if err != nil {
+		t.Fatalf("truncated denylist file blocked load: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("truncated denylist: got %v, want empty", got)
+	}
+}
+
+func TestSeedMissingGamesSurvivesCorruptDenylist(t *testing.T) {
+	scriptDir := t.TempDir()
+	dataDir := t.TempDir()
+	mustWrite(t, filepath.Join(scriptDir, "seed", "games", "card-judge", "deploy.conf"), "SEED")
+	if err := os.WriteFile(filepath.Join(dataDir, removedGamesFile), []byte("{"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := seedMissingGames(scriptDir, dataDir); err != nil {
+		t.Fatalf("corrupt denylist blocked seed: %v", err)
+	}
+	got, err := os.ReadFile(filepath.Join(dataDir, "games", "card-judge", "deploy.conf"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "SEED" {
+		t.Fatalf("missing game not seeded after corrupt denylist: %q", got)
+	}
+}
+
 func TestForgetRemovedGameAllowsReseed(t *testing.T) {
 	scriptDir := t.TempDir()
 	dataDir := t.TempDir()
