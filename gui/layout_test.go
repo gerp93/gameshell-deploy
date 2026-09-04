@@ -195,6 +195,27 @@ func TestWriteFileAtomicReplacesExisting(t *testing.T) {
 	}
 }
 
+func TestWriteFileAtomicKeepsDestOnFailedRename(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, removedGamesFile)
+	// Rename of a file onto a directory fails. The old remove-then-retry
+	// path deleted that empty directory, then the retry succeeded and
+	// replaced it with a file — the denylist (or anything at dest) gone.
+	if err := os.Mkdir(path, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeFileAtomic(path, []byte(`["card-judge"]`+"\n"), 0o644); err == nil {
+		t.Fatal("expected rename onto a directory to fail")
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("dest was removed after failed rename: %v", err)
+	}
+	if !info.IsDir() {
+		t.Fatal("dest was replaced after a failed rename")
+	}
+}
+
 func TestForgetRemovedGameAllowsReseed(t *testing.T) {
 	scriptDir := t.TempDir()
 	dataDir := t.TempDir()
