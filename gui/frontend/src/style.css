@@ -528,7 +528,8 @@ button.secondary:hover:not(:disabled) {
   min-width: 10rem;
 }
 
-.extra-env-row .extra-env-check {
+.extra-env-row .extra-env-check,
+.field .extra-env-check {
   display: flex;
   align-items: center;
   gap: 0.35rem;

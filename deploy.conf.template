@@ -22,7 +22,9 @@ ENV_VAR_PREFIX=MY_GAME
 # in this file — create.sh looks each name up at deploy time, same as
 # DEPLOY_SQL_*. A leading '+' concatenates ENV_VAR_PREFIX
 # ("+YT_API_KEY" becomes MY_GAME_YT_API_KEY); unmarked names are injected
-# as-is.
+# as-is. Quote the value if you use spaces (otherwise bash treats later
+# names as commands): EXTRA_ENV_VARS="+YT_API_KEY +OTHER". Commas need no
+# quotes: EXTRA_ENV_VARS=+YT_API_KEY,+OTHER
 EXTRA_ENV_VARS=
 
 # Database name created on the droplet and restored into.

@@ -43,7 +43,9 @@ encrypts database backups at rest.
   operator's environment onto the DO app — never the values themselves. A
   leading `+` concatenates `ENV_VAR_PREFIX` (`+YT_API_KEY` with prefix
   `TRACK_TIMELINE` becomes `TRACK_TIMELINE_YT_API_KEY`); unmarked names are
-  injected as-is.
+  injected as-is. Space-separated lists must be quoted
+  (`EXTRA_ENV_VARS="+A +B"`) so `source` does not treat later names as
+  commands; commas (`+A,+B`) do not need quotes. The GUI quotes on save.
 - **Data** (this repo, per-game, git-ignored): `games/APP_NAME/backups/`, a
   directory of GPG-encrypted database dumps (`*.sql.gpg`). The whole
   `backups/` directory is git-ignored (`games/*/backups/` in
@@ -60,7 +62,10 @@ encrypts database backups at rest.
   create time and written into the rendered app spec (not through `sed`,
   because values can contain the delimiters the SQL substitutions use).
   Don't hardcode a game's API key name into `create.sh`/`templates/spec.yaml`
-  — that's what `EXTRA_ENV_VARS` is for.
+  — that's what `EXTRA_ENV_VARS` is for. The GUI may optionally remember
+  those values in the OS keyring (`gui/secrets`) when the operator checks
+  "Remember secrets on this computer"; they still never land in
+  `deploy.conf` or `settings.json`.
 - **`GPG_PASSPHRASE`** (optional operator secret): backups are symmetric
   `gpg -c`/`gpg -d`, which normally prompts interactively via pinentry — fine
   for CLI use, but the GUI has no TTY for that. When set, `create.sh`/

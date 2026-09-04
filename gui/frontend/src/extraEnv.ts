@@ -1,5 +1,6 @@
 // EXTRA_ENV_VARS lives in deploy.conf as a single space-separated string
-// (create.sh sources it as bash). A leading '+' means concat with
+// (create.sh sources it as bash; the Go save path quotes it so spaces
+// don't become extra commands). A leading '+' means concat with
 // ENV_VAR_PREFIX at resolve time: "+YT_API_KEY" with prefix TRACK_TIMELINE
 // becomes TRACK_TIMELINE_YT_API_KEY. Unmarked names are used as-is.
 // Commas are treated as separators too, so a pasted "A, B" list isn't one

@@ -4,6 +4,7 @@ package platform
 
 import (
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 	"syscall"
@@ -86,6 +87,23 @@ func wslAvailable() bool {
 		return false
 	}
 	return hidden(exec.Command("wsl.exe", "--status")).Run() == nil
+}
+
+func lookupEnv(name string) string {
+	if v := os.Getenv(name); v != "" {
+		return v
+	}
+	if !wslAvailable() {
+		return ""
+	}
+	// bash -lc so ~/.profile / ~/.bashrc exports are visible, matching how
+	// an operator running ./create.sh in a WSL terminal would see them.
+	// name is validated by LookupEnv before this runs.
+	out, err := hidden(exec.Command("wsl.exe", "-e", "bash", "-lc", "printenv "+name)).Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimRight(string(out), "\r\n")
 }
 
 // openFolder runs directly on Windows (not through wsl.exe) since path is

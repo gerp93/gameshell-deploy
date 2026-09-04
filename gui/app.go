@@ -17,6 +17,7 @@ import (
 	"gameshell-deploy-gui/platform"
 	"gameshell-deploy-gui/preflight"
 	"gameshell-deploy-gui/scriptrunner"
+	"gameshell-deploy-gui/secrets"
 	"gameshell-deploy-gui/settings"
 )
 
@@ -135,6 +136,40 @@ func (a *App) SetTheme(theme string) error {
 	}
 	s.Theme = theme
 	return settings.Save(s)
+}
+
+// SetRememberSecrets stores the opt-in to keep SQL/API/GPG secrets in the
+// OS keyring. This flag is not a secret; the values themselves never land
+// in settings.json.
+func (a *App) SetRememberSecrets(remember bool) error {
+	s, err := settings.Load()
+	if err != nil {
+		return err
+	}
+	s.RememberSecrets = remember
+	return settings.Save(s)
+}
+
+// LoadSecrets fills SQL/GPG/extra values from the environment first (same
+// names as the CLI), then from the OS keyring for anything still empty.
+func (a *App) LoadSecrets(extraNames []string) (secrets.Bundle, error) {
+	env := secrets.FromEnv(extraNames)
+	stored, err := secrets.Load(extraNames)
+	if err != nil {
+		return env, nil
+	}
+	return secrets.Merge(env, stored), nil
+}
+
+// SaveSecrets writes non-empty fields to the OS keyring. Empty fields are
+// left unchanged so a blank box doesn't wipe a previously saved value.
+func (a *App) SaveSecrets(bundle secrets.Bundle) error {
+	return secrets.Save(bundle)
+}
+
+// ForgetSecrets removes SQL/GPG secrets and the extra names listed.
+func (a *App) ForgetSecrets(extraNames []string) error {
+	return secrets.Forget(extraNames)
 }
 
 func gameConfigDir(opsDir, appName string) string {

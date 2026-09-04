@@ -96,7 +96,11 @@ build time, `CheckForUpdate` will always report "up to date."
 - `deployconf/` — reads/writes a game's `games/APP_NAME/deploy.conf` without
   disturbing its comments.
 - `preflight/` — checks doctl/gpg/ssh (and WSL, on Windows) are present.
-- `settings/` — persists the last-used app name and UI theme (never secrets)
-  outside the repo tree. The ops dir is never persisted — it's re-detected
+- `settings/` — persists the last-used app name, UI theme, and the
+  "remember secrets" preference (never the secrets themselves) outside
+  the repo tree. The ops dir is never persisted — it's re-detected
   from the running executable's location every startup.
+- `secrets/` — optional OS-keyring storage for SQL/API/GPG values the
+  operator opted to remember (Windows Credential Manager, macOS Keychain,
+  Linux Secret Service). Not the repo, not settings.json, not deploy.conf.
 - `frontend/` — the UI (plain TypeScript + Vite, no framework).

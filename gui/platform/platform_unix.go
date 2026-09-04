@@ -47,3 +47,7 @@ func desktopOpener() string {
 	}
 	return "xdg-open"
 }
+
+func lookupEnv(name string) string {
+	return os.Getenv(name)
+}

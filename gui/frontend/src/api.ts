@@ -8,6 +8,14 @@ import { EventsOn } from "../wailsjs/runtime/runtime";
 export interface Settings {
   lastAppName: string;
   theme: string;
+  rememberSecrets: boolean;
+}
+
+export interface SecretsBundle {
+  sqlUser: string;
+  sqlPassword: string;
+  gpgPassphrase: string;
+  extraEnv: Record<string, string>;
 }
 
 export interface DeployConf {
@@ -98,6 +106,10 @@ export interface DeleteRequest {
 }
 
 export const loadSettings = (): Promise<Settings> => Backend.LoadSettings();
+export const setRememberSecrets = (remember: boolean): Promise<void> => Backend.SetRememberSecrets(remember);
+export const loadSecrets = (extraNames: string[]): Promise<SecretsBundle> => Backend.LoadSecrets(extraNames);
+export const saveSecrets = (bundle: SecretsBundle): Promise<void> => Backend.SaveSecrets(bundle);
+export const forgetSecrets = (extraNames: string[]): Promise<void> => Backend.ForgetSecrets(extraNames);
 export const getOpsDir = (): Promise<string> => Backend.GetOpsDir();
 export const openOpsDir = (opsDir: string): Promise<void> => Backend.OpenOpsDir(opsDir);
 export const listGames = (opsDir: string): Promise<string[]> => Backend.ListGames(opsDir);
