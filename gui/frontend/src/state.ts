@@ -84,6 +84,15 @@ export function isGameRunning(kind: RunKind, appName: string): boolean {
   return getGameRun(kind, appName).running;
 }
 
+// True after this kind's script exited non-zero. Used to keep the Deploy
+// panel (and its log) on screen when a failed create still left a droplet
+// behind — otherwise isDeployed() flips the Action tab to empty Teardown
+// and the operator never sees why it failed.
+export function hasFailedExit(kind: RunKind, appName: string): boolean {
+  const run = getGameRun(kind, appName);
+  return Boolean(!run.running && run.lastExit && run.lastExit.code !== 0);
+}
+
 // Which script, if any, is currently running for this game. A run in flight
 // outranks Digital Ocean's reported status when deciding which panel to
 // show: mid-deploy the droplet already exists while the app doesn't, so

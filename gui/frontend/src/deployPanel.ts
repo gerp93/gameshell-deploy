@@ -15,7 +15,7 @@ import {
 } from "./api";
 import { createLogPane } from "./logPane";
 import { refreshStatus, scheduleStatusReconcile } from "./appPanel";
-import { state, preflightPassed, isDeployed, isGameRunning, getGameRun, clearGameRun, notify } from "./state";
+import { state, preflightPassed, isDeployed, isGameRunning, hasFailedExit, getGameRun, clearGameRun, notify } from "./state";
 import { createRunSummary } from "./runSummary";
 import { resolveExtraEnvNames } from "./extraEnv";
 
@@ -498,7 +498,13 @@ export function createDeployPanel(): { el: HTMLElement; render: () => void } {
     // its own run.
     const running = isGameRunning("create", state.appName);
     const deleting = isGameRunning("delete", state.appName);
-    const show = Boolean(state.appName) && !deleting && (running || isDeployed() !== true);
+    // A failed create that already made a droplet would otherwise hide this
+    // panel (isDeployed() becomes true) and swap to empty Teardown — keep
+    // the log visible so the operator can see why it died.
+    const show =
+      Boolean(state.appName) &&
+      !deleting &&
+      (running || hasFailedExit("create", state.appName) || isDeployed() !== true);
     el.style.display = show ? "" : "none";
     if (!show) return;
 
