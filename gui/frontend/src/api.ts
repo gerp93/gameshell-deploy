@@ -112,8 +112,10 @@ export interface DeleteRequest {
 
 export const loadSettings = (): Promise<Settings> => Backend.LoadSettings();
 export const setRememberSecrets = (remember: boolean): Promise<void> => Backend.SetRememberSecrets(remember);
-export const loadSecrets = (extraNames: string[]): Promise<SecretsBundle> => Backend.LoadSecrets(extraNames);
-export const saveSecrets = (bundle: SecretsBundle): Promise<void> => Backend.SaveSecrets(bundle);
+export const loadSecrets = (extraNames: string[]): Promise<SecretsBundle> =>
+  Backend.LoadSecrets(extraNames) as Promise<SecretsBundle>;
+export const saveSecrets = (bundle: SecretsBundle): Promise<void> =>
+  Backend.SaveSecrets(bundle as never);
 export const forgetSecrets = (extraNames: string[]): Promise<void> => Backend.ForgetSecrets(extraNames);
 export const getOpsDir = (): Promise<string> => Backend.GetOpsDir();
 export const openOpsDir = (opsDir: string): Promise<void> => Backend.OpenOpsDir(opsDir);
@@ -142,7 +144,7 @@ export const listAvailableRegions = (opsDir: string, appName: string): Promise<R
 export const openURL = (url: string): Promise<void> => Backend.OpenURL(url);
 export const checkStatus = (appName: string): Promise<StatusResult> => Backend.CheckStatus(appName);
 
-export const runCreate = (req: CreateRequest): Promise<void> => Backend.RunCreate(req);
+export const runCreate = (req: CreateRequest): Promise<void> => Backend.RunCreate(req as never);
 export const runDelete = (req: DeleteRequest): Promise<void> => Backend.RunDelete(req);
 export const cancelRun = (appName: string): Promise<boolean> => Backend.CancelRun(appName);
 
