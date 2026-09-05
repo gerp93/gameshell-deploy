@@ -149,8 +149,8 @@ else
 			exit 1
 		fi
 
-		ssh root@"$DROPLET_IP" "mariadb-dump --order-by-primary $DB_NAME | sed -e 's/DEFINER[ ]*=[ ]*[^*]*\*/\*/' > /root/backup.sql"
-		scp root@"$DROPLET_IP":/root/backup.sql "$BACKUP_SQL_PATH" >/dev/null 2>&1
+		ssh -o StrictHostKeyChecking=no root@"$DROPLET_IP" "mariadb-dump --order-by-primary $DB_NAME | sed -e 's/DEFINER[ ]*=[ ]*[^*]*\*/\*/' > /root/backup.sql"
+		scp -o StrictHostKeyChecking=no root@"$DROPLET_IP":/root/backup.sql "$BACKUP_SQL_PATH" >/dev/null 2>&1
 
 		if [ ! -f "$BACKUP_SQL_PATH" ]; then
 			echo "Backup failed: backup file not found"
