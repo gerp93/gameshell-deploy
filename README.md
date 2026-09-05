@@ -65,8 +65,10 @@ instead of prompting.
 Both scripts also accept flags so GUI wrappers can drive them
 non-interactively — `create.sh` takes `--ssh-key=NAME`, `--tier=1|2|3`, and
 `--yes` (auto-confirms the fork-sync push); `delete.sh` takes
-`--backup=yes|no`. Omit any of them and the matching interactive prompt runs
-as normal.
+`--backup=yes|no` and `--ssh-key=NAME` (which key to use for the
+pre-teardown database backup). Skip-backup teardown never SSHes, so
+`--ssh-key` is ignored when `--backup=no`. Omit any of them and the
+matching interactive prompt runs as normal.
 
 If `deploy.conf` sets `GIT_UPSTREAM` (a fork's upstream repo, `owner/name`),
 `create.sh` checks it for commits not yet in `GIT_REPO` and offers to push

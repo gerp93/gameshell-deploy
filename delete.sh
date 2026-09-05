@@ -2,14 +2,20 @@
 ################################################################################
 # Back up and delete a Digital Ocean instance of a gameshell-framework game.
 #
-# Usage:  ./delete.sh APP_NAME [--backup=yes|no]
+# Usage:  ./delete.sh APP_NAME [--backup=yes|no] [--ssh-key=NAME]
 #   APP_NAME is the game name (e.g., timeline-trivia, card-judge). Config is
 #   read from games/APP_NAME/deploy.conf. A new GPG-encrypted backup is
 #   written into games/APP_NAME/backups before teardown (unless declined).
 #
 #   --backup=yes|no  skip the backup prompt, use this answer
-#   This flag exists so GUI wrappers can drive this script non-interactively;
-#   omit it and the backup prompt below still runs as normal.
+#   --ssh-key=NAME   skip the SSH key prompt, use this key name for the
+#                    backup ssh/scp. Same name resolution as create.sh
+#                    (substring match, exact name if more than one hits).
+#                    Ignored when not backing up — skip-backup teardown
+#                    never SSHes, so a leftover droplet with no usable
+#                    key can still be destroyed.
+#   These flags exist so GUI wrappers can drive this script non-interactively;
+#   omit them and the matching prompts below still run as normal.
 #
 # Operator secret (optional): GPG_PASSPHRASE encrypts the new backup
 # non-interactively (--batch --passphrase-fd) instead of prompting via
@@ -83,10 +89,12 @@ fi
 # parse args
 
 BACKUP_FLAG=""
+SSH_KEY_NAME_FLAG=""
 APP_NAME_ARG=""
 for arg in "$@"; do
 	case "$arg" in
 		--backup=*) BACKUP_FLAG="${arg#*=}" ;;
+		--ssh-key=*) SSH_KEY_NAME_FLAG="${arg#*=}" ;;
 		-*)
 			echo "Unknown option: $arg"
 			exit 1
@@ -94,7 +102,7 @@ for arg in "$@"; do
 		*) APP_NAME_ARG="$arg" ;;
 	esac
 done
-: "${APP_NAME_ARG:?Usage: ./delete.sh APP_NAME [--backup=yes|no]}"
+: "${APP_NAME_ARG:?Usage: ./delete.sh APP_NAME [--backup=yes|no] [--ssh-key=NAME]}"
 GAME_CONFIG_DIR="$OPS_DIR/games/$APP_NAME_ARG"
 
 ################################################################################
@@ -120,6 +128,8 @@ source "$CONFIG_PATH"
 
 DROPLET_NAME="$APP_NAME-database"
 BACKUP_DIR="$GAME_CONFIG_DIR/backups"
+SSH_IDENTITY_TEMP=""
+trap '[[ -n "$SSH_IDENTITY_TEMP" ]] && rm -f "$SSH_IDENTITY_TEMP"' EXIT
 
 ################################################################################
 # delete droplet
@@ -139,6 +149,97 @@ else
 	fi
 	if [[ "$BACKUP_DB" != "n" ]]; then
 		echo "----------------------------------------"
+		# Same name-resolution loop as create.sh: substring first, exact
+		# name if more than one DigitalOcean key matches. create.sh uses
+		# the resulting ID to attach the public key to the droplet;
+		# delete.sh uses it to pin ssh/scp to the matching local identity
+		# so a second similarly-named key in the agent cannot steal the
+		# connection (or exhaust MaxAuthTries before the right one is
+		# tried). Loops only when SSH_KEY_NAME_FLAG is unset — --ssh-key
+		# is how the GUI drives this, and a retry loop there would hang
+		# waiting on stdin that never comes.
+		while true; do
+			if [[ -n "$SSH_KEY_NAME_FLAG" ]]; then
+				SSH_KEY_NAME="$SSH_KEY_NAME_FLAG"
+				echo "SSH Key Name: $SSH_KEY_NAME (from --ssh-key)"
+			else
+				echo "Which of the following SSH Keys was attached to the database droplet?"
+				doctl compute ssh-key list --format=Name --no-header
+				read -p "SSH Key Name: " SSH_KEY_NAME
+			fi
+			if [[ -z "$SSH_KEY_NAME" ]]; then
+				echo "SSH Key Name not provided"
+				exit 1
+			fi
+
+			# grep -c exits 1 (a "failure" under set -e) when it counts zero
+			# matches, even though it prints "0" correctly — every grep -c
+			# here is `|| true`'d so a zero count is reported, not treated
+			# as a script-aborting error.
+			SSH_KEY_MATCHES=$(doctl compute ssh-key list --format=ID,Name --no-header | grep "$SSH_KEY_NAME" || true)
+			SSH_KEY_MATCH_COUNT=$(printf '%s\n' "$SSH_KEY_MATCHES" | grep -c '.' || true)
+			if [[ "$SSH_KEY_MATCH_COUNT" -eq 0 ]]; then
+				echo "SSH Key ID not found"
+				[[ -n "$SSH_KEY_NAME_FLAG" ]] && exit 1
+				continue
+			elif [[ "$SSH_KEY_MATCH_COUNT" -eq 1 ]]; then
+				SSH_KEY_ID=$(printf '%s\n' "$SSH_KEY_MATCHES" | cut -d ' ' -f 1)
+				break
+			fi
+
+			# SSH_KEY_NAME matched more than one key as a substring (e.g.
+			# "foo" also matching "foo-bar") — only proceed if exactly one
+			# match is the exact name typed. Otherwise we'd pick an
+			# arbitrary ID (or mash several together) and pin ssh to the
+			# wrong local identity.
+			SSH_KEY_EXACT=$(printf '%s\n' "$SSH_KEY_MATCHES" | awk -v name="$SSH_KEY_NAME" '$2 == name')
+			SSH_KEY_EXACT_COUNT=$(printf '%s\n' "$SSH_KEY_EXACT" | grep -c '.' || true)
+			if [[ "$SSH_KEY_EXACT_COUNT" -eq 1 ]]; then
+				SSH_KEY_ID=$(printf '%s\n' "$SSH_KEY_EXACT" | cut -d ' ' -f 1)
+				break
+			fi
+
+			echo "\"$SSH_KEY_NAME\" matches more than one SSH key:"
+			printf '%s\n' "$SSH_KEY_MATCHES"
+			if [[ -n "$SSH_KEY_NAME_FLAG" ]]; then
+				echo "Be more specific with --ssh-key."
+				exit 1
+			fi
+			echo "Type one of the names above exactly."
+		done
+
+		# Pin ssh/scp to the local identity that matches this DigitalOcean
+		# public key. ssh will otherwise try every key in the agent; with
+		# two similar names that can exhaust MaxAuthTries before the one
+		# actually on the droplet is offered. Prefer a matching ~/.ssh
+		# private key; if the private key is only in the agent, a tempfile
+		# of the public key is enough for OpenSSH to select it.
+		SSH_KEY_PUB=$(doctl compute ssh-key get "$SSH_KEY_ID" --format=PublicKey --no-header)
+		SSH_KEY_BLOB=$(printf '%s\n' "$SSH_KEY_PUB" | awk '{print $2}')
+		if [[ -z "$SSH_KEY_BLOB" ]]; then
+			echo "Could not read public key for SSH key ID $SSH_KEY_ID"
+			exit 1
+		fi
+		SSH_IDENTITY=""
+		for pub in "$HOME"/.ssh/*.pub; do
+			[[ -f "$pub" ]] || continue
+			if [[ "$(awk '{print $2}' "$pub")" == "$SSH_KEY_BLOB" ]]; then
+				ident="${pub%.pub}"
+				if [[ -f "$ident" ]]; then
+					SSH_IDENTITY="$ident"
+					break
+				fi
+			fi
+		done
+		if [[ -z "$SSH_IDENTITY" ]]; then
+			SSH_IDENTITY_TEMP=$(mktemp)
+			printf '%s\n' "$SSH_KEY_PUB" > "$SSH_IDENTITY_TEMP"
+			chmod 600 "$SSH_IDENTITY_TEMP"
+			SSH_IDENTITY="$SSH_IDENTITY_TEMP"
+		fi
+		echo "Using SSH identity $SSH_IDENTITY"
+
+		echo "----------------------------------------"
 		echo "Backing Up Database..."
 
 		BACKUP_SQL_PATH="$BACKUP_DIR/$(date +%Y%m%d%H%M%S)_backup_${APP_NAME}.sql"
@@ -149,8 +250,26 @@ else
 			exit 1
 		fi
 
-		ssh -o StrictHostKeyChecking=no root@"$DROPLET_IP" "mariadb-dump --order-by-primary $DB_NAME | sed -e 's/DEFINER[ ]*=[ ]*[^*]*\*/\*/' > /root/backup.sql"
-		scp -o StrictHostKeyChecking=no root@"$DROPLET_IP":/root/backup.sql "$BACKUP_SQL_PATH" >/dev/null 2>&1
+		# BatchMode so a missing key fails immediately instead of hanging
+		# on a password prompt the GUI has no TTY to answer. IdentitiesOnly
+		# so ssh-agent cannot offer a different similarly-named key first.
+		SSH_OPTS=(
+			-o BatchMode=yes
+			-o StrictHostKeyChecking=no
+			-o IdentitiesOnly=yes
+			-i "$SSH_IDENTITY"
+		)
+		set +e
+		ssh "${SSH_OPTS[@]}" root@"$DROPLET_IP" "mariadb-dump --order-by-primary $DB_NAME | sed -e 's/DEFINER[ ]*=[ ]*[^*]*\*/\*/' > /root/backup.sql"
+		SSH_STATUS=$?
+		set -e
+		if [ "$SSH_STATUS" -ne 0 ]; then
+			echo "SSH to root@$DROPLET_IP failed (exit $SSH_STATUS) with DigitalOcean key \"$SSH_KEY_NAME\"."
+			echo "Use the same SSH key that was attached when the droplet was created."
+			echo "If this droplet was created with an ambiguous/mangled SSH key name, it may have no usable key attached — skip the backup to tear it down."
+			exit 1
+		fi
+		scp "${SSH_OPTS[@]}" root@"$DROPLET_IP":/root/backup.sql "$BACKUP_SQL_PATH" >/dev/null 2>&1
 
 		if [ ! -f "$BACKUP_SQL_PATH" ]; then
 			echo "Backup failed: backup file not found"

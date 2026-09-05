@@ -107,6 +107,7 @@ export interface DeleteRequest {
   opsDir: string;
   appName: string;
   backup: "yes" | "no" | "";
+  sshKeyName: string;
   gpgPassphrase: string;
 }
 
@@ -145,7 +146,7 @@ export const openURL = (url: string): Promise<void> => Backend.OpenURL(url);
 export const checkStatus = (appName: string): Promise<StatusResult> => Backend.CheckStatus(appName);
 
 export const runCreate = (req: CreateRequest): Promise<void> => Backend.RunCreate(req as never);
-export const runDelete = (req: DeleteRequest): Promise<void> => Backend.RunDelete(req);
+export const runDelete = (req: DeleteRequest): Promise<void> => Backend.RunDelete(req as never);
 export const cancelRun = (appName: string): Promise<boolean> => Backend.CancelRun(appName);
 
 // See app.go's CheckForUpdate/ApplyUpdate — this path is not yet verified

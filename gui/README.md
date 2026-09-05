@@ -9,7 +9,10 @@ It does not reimplement any deploy logic: it shells out to the tracked
 `create.sh`/`delete.sh` in the same checkout it's running from (auto-detected
 from its own location — see `app.go`'s `GetOpsDir`), using their
 `--ssh-key`/`--tier`/`--yes`/`--backup` flags to drive them non-interactively,
-and streams their real stdout/stderr into a log pane. The deploy panel's
+and streams their real stdout/stderr into a log pane. The teardown panel's
+SSH key picker is the same DigitalOcean key list as deploy — `delete.sh`
+needs it to pin the backup `ssh`/`scp` to the matching local identity
+(otherwise ssh-agent can offer a similarly-named key first). The deploy panel's
 tier picker is likewise not reimplemented in Go — it calls
 `create.sh APP_NAME --list-tiers` (see `scriptrunner.ListAvailableTiers`) to
 run the same region-availability check create.sh itself runs before

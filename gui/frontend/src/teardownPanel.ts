@@ -1,4 +1,4 @@
-import { runDelete, loadSecrets, loadSettings, saveSecrets } from "./api";
+import { runDelete, listSSHKeys, loadSecrets, loadSettings, saveSecrets } from "./api";
 import { createLogPane } from "./logPane";
 import { refreshStatus, scheduleStatusReconcile } from "./appPanel";
 import { state, preflightPassed, isDeployed, isGameRunning, hasFailedExit, getGameRun, clearGameRun, notify } from "./state";
@@ -10,6 +10,42 @@ export function createTeardownPanel(): { el: HTMLElement; render: () => void } {
 
   const leftoverHint = document.createElement("p");
   leftoverHint.className = "hint";
+
+  // Same DigitalOcean key list as the deploy panel. Backup ssh/scp has to
+  // offer the private key that matches whatever was attached at create
+  // time — with two similar names, ssh-agent can try the wrong one first
+  // (or exhaust MaxAuthTries) unless delete.sh is told which key to pin.
+  const sshKeyWrap = document.createElement("div");
+  sshKeyWrap.className = "field";
+  const sshKeyLabel = document.createElement("label");
+  sshKeyLabel.textContent = "SSH key (must match the one attached at create)";
+  const sshKeyRow = document.createElement("div");
+  sshKeyRow.className = "row";
+  const sshKeySelect = document.createElement("select");
+  const refreshKeysButton = document.createElement("button");
+  refreshKeysButton.type = "button";
+  refreshKeysButton.className = "secondary";
+  refreshKeysButton.textContent = "Refresh";
+  refreshKeysButton.onclick = () => void refreshKeys();
+  sshKeySelect.onchange = () => render();
+  sshKeyRow.append(sshKeySelect, refreshKeysButton);
+  sshKeyWrap.append(sshKeyLabel, sshKeyRow);
+
+  async function refreshKeys() {
+    sshKeySelect.innerHTML = "";
+    try {
+      const keys = (await listSSHKeys()) ?? [];
+      for (const key of keys) {
+        const opt = document.createElement("option");
+        opt.value = key;
+        opt.textContent = key;
+        sshKeySelect.appendChild(opt);
+      }
+    } catch {
+      // doctl unavailable — Teardown stays disabled while backup is on.
+    }
+    render();
+  }
 
   const status = document.createElement("div");
   status.className = "status-line";
@@ -105,6 +141,7 @@ export function createTeardownPanel(): { el: HTMLElement; render: () => void } {
     if (!state.appName || !state.opsDir) return;
     const appName = state.appName;
     const backup = backupYes.checked ? "yes" : "no";
+    const sshKeyName = sshKeySelect.value;
     const gpgPassphrase = gpgPassphraseInput.value;
 
     // Mark this game as running immediately (before the first log line
@@ -113,7 +150,10 @@ export function createTeardownPanel(): { el: HTMLElement; render: () => void } {
     clearGameRun("delete", appName);
     const run = getGameRun("delete", appName);
     run.running = true;
-    run.params = [["Back up database first", backup === "yes" ? "yes" : "no"]];
+    run.params = [
+      ["Back up database first", backup === "yes" ? "yes" : "no"],
+      ...(backup === "yes" ? [["SSH key", sshKeyName] as [string, string]] : []),
+    ];
     teardownButton.disabled = true;
     const s = await loadSettings();
     if (s.rememberSecrets && gpgPassphrase) {
@@ -138,6 +178,7 @@ export function createTeardownPanel(): { el: HTMLElement; render: () => void } {
       opsDir: state.opsDir,
       appName,
       backup,
+      sshKeyName: backup === "yes" ? sshKeyName : "",
       gpgPassphrase,
     });
   };
@@ -156,6 +197,7 @@ export function createTeardownPanel(): { el: HTMLElement; render: () => void } {
   // Hidden while a teardown is in flight — same reasoning as the deploy
   // panel: a run you switch back to should show progress, not a form.
   const formParts = [
+    sshKeyWrap,
     backupLabelYes,
     backupLabelNo,
     gpgPassphraseWrap,
@@ -166,6 +208,7 @@ export function createTeardownPanel(): { el: HTMLElement; render: () => void } {
 
   el.append(
     leftoverHint,
+    sshKeyWrap,
     backupLabelYes,
     backupLabelNo,
     gpgPassphraseWrap,
@@ -182,6 +225,7 @@ export function createTeardownPanel(): { el: HTMLElement; render: () => void } {
   // recursing back into render().
   function applyGPGVisibility() {
     const show = backupYes.checked;
+    sshKeyWrap.style.display = show ? "" : "none";
     gpgPassphraseWrap.style.display = show ? "" : "none";
     gpgConfirmWrap.style.display = show ? "" : "none";
   }
@@ -214,7 +258,7 @@ export function createTeardownPanel(): { el: HTMLElement; render: () => void } {
     logPane.showGame(state.appName);
     leftoverHint.textContent =
       hasFailedExit("create", state.appName) && isDeployed() === true
-        ? "Deploy failed after creating cloud resources. The deploy log is above — teardown when you're ready to clean up."
+        ? "Deploy failed after creating cloud resources. The deploy log is above — teardown when you're ready to clean up. If SSH backup fails with Permission denied, skip the backup: a mangled SSH key at create time can leave the droplet with no usable key."
         : "";
     leftoverHint.style.display = leftoverHint.textContent ? "" : "none";
     runSummary.render(state.appName, { running: "Tearing down", done: "Torn down" });
@@ -230,11 +274,13 @@ export function createTeardownPanel(): { el: HTMLElement; render: () => void } {
     // ready — only applies while the form itself is actually shown.
     el.dataset.disabled = !running && !ready ? "true" : "false";
     const mismatch = gpgMismatch();
-    teardownButton.disabled = !ready || running || mismatch;
+    const missingKey = backupYes.checked && !sshKeySelect.value;
+    teardownButton.disabled = !ready || running || mismatch || missingKey;
     gpgMismatchWarning.textContent = mismatch ? "GPG_PASSPHRASE and its confirmation don't match." : "";
     status.textContent = preflightPassed() ? "" : "Fix the failing Prerequisites checks above before tearing down.";
   }
 
+  void refreshKeys();
   render();
   return { el, render };
 }
