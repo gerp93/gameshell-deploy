@@ -2,7 +2,10 @@
 // their --ssh-key/--tier/--yes/--backup flags) and streams their stdout and
 // stderr line-by-line to a caller-supplied Emitter. Runs are tracked per app
 // name, so deploying/tearing down two different games at once is supported
-// — each gets its own process and its own stream of events.
+// — each gets its own process and its own stream of events. Both scripts
+// take --ssh-key: create.sh to attach that DigitalOcean key to the droplet,
+// delete.sh to pin the pre-teardown backup ssh/scp to the matching local
+// identity.
 package scriptrunner
 
 import (
@@ -71,14 +74,17 @@ type CreateRequest struct {
 	ExtraEnv []ExtraEnvVar `json:"extraEnv"`
 }
 
-// DeleteRequest mirrors delete.sh's positional arg + flag. Backup is
+// DeleteRequest mirrors delete.sh's positional arg + flags. Backup is
 // "yes" or "no" — matching --backup=yes|no; leave empty to fall back to
 // delete.sh's own interactive prompt (not used by the GUI, but supported
-// for completeness).
+// for completeness). SSHKeyName is the DigitalOcean key used for the
+// backup ssh/scp (--ssh-key); unused when Backup is "no", since skip-
+// backup teardown never SSHes.
 type DeleteRequest struct {
 	OpsDir        string `json:"opsDir"`
 	AppName       string `json:"appName"`
 	Backup        string `json:"backup"`
+	SSHKeyName    string `json:"sshKeyName"`
 	GPGPassphrase string `json:"gpgPassphrase"`
 }
 
@@ -138,6 +144,9 @@ func RunDelete(req DeleteRequest, emit Emitter) error {
 	args := []string{req.AppName}
 	if req.Backup != "" {
 		args = append(args, "--backup="+req.Backup)
+	}
+	if req.SSHKeyName != "" {
+		args = append(args, "--ssh-key="+req.SSHKeyName)
 	}
 	var env []string
 	if req.GPGPassphrase != "" {
@@ -243,7 +252,7 @@ func ListAvailableRegions(opsDir, appName string) ([]RegionOption, error) {
 }
 
 // ListSSHKeys runs `doctl compute ssh-key list` (via WSL on Windows) and
-// returns the key names for the deploy-panel dropdown.
+// returns the key names for the deploy- and teardown-panel dropdowns.
 func ListSSHKeys() ([]string, error) {
 	cmd, err := platform.RawCommand("doctl", []string{"compute", "ssh-key", "list", "--format=Name", "--no-header"})
 	if err != nil {
