@@ -37,7 +37,10 @@ export function createDeployPanel(): { el: HTMLElement; render: () => void } {
   refreshKeysButton.textContent = "Refresh";
   refreshKeysButton.onclick = () => void refreshKeys();
   sshKeyRow.append(sshKeySelect, refreshKeysButton);
-  sshKeyWrap.append(sshKeyLabel, sshKeyRow);
+  const sshKeyHint = document.createElement("div");
+  sshKeyHint.className = "hint";
+  sshKeyWrap.append(sshKeyLabel, sshKeyRow, sshKeyHint);
+  let keysLoadedForOpsDir = "";
 
   // Region override: defaults to deploy.conf's DROPLET_REGION, but since
   // the tier sizes aren't sold everywhere (and the nyc3 default sells none
@@ -377,14 +380,28 @@ export function createDeployPanel(): { el: HTMLElement; render: () => void } {
   );
 
   async function refreshKeys() {
+    if (!state.opsDir) return;
+    const previously = sshKeySelect.value;
     sshKeySelect.innerHTML = "";
-    const keys = await listSSHKeys();
-    for (const key of keys) {
-      const opt = document.createElement("option");
-      opt.value = key;
-      opt.textContent = key;
-      sshKeySelect.appendChild(opt);
+    try {
+      const keys = (await listSSHKeys(state.opsDir)) ?? [];
+      for (const key of keys) {
+        const opt = document.createElement("option");
+        opt.value = key;
+        opt.textContent = key;
+        sshKeySelect.appendChild(opt);
+      }
+      if (previously && keys.includes(previously)) {
+        sshKeySelect.value = previously;
+      }
+      sshKeyHint.textContent =
+        keys.length > 0
+          ? "Only keys that exist both on this DigitalOcean account and on this computer (~/.ssh or ssh-agent)."
+          : "None of this account's SSH keys are on this computer. Add this PC's public key to DigitalOcean, or copy the matching private key into ~/.ssh.";
+    } catch (err) {
+      sshKeyHint.textContent = `Could not list SSH keys: ${err instanceof Error ? err.message : String(err)}`;
     }
+    void render();
   }
 
   // Populates regionSelect with the regions create.sh reports as offering
@@ -503,7 +520,7 @@ export function createDeployPanel(): { el: HTMLElement; render: () => void } {
 
   function formFilled(): boolean {
     const tierChosen = tierInputs.some((i) => i.checked);
-    if (!tierChosen || sqlUserInput.value.trim() === "" || sqlPasswordInput.value.trim() === "") {
+    if (!tierChosen || !sshKeySelect.value || sqlUserInput.value.trim() === "" || sqlPasswordInput.value.trim() === "") {
       return false;
     }
     for (const input of extraEnvInputs.values()) {
@@ -552,6 +569,10 @@ export function createDeployPanel(): { el: HTMLElement; render: () => void } {
       tiersLoadedForApp = state.appName;
       void refreshRegions().then(refreshTiers);
     }
+    if (!hideForm && state.opsDir && keysLoadedForOpsDir !== state.opsDir) {
+      keysLoadedForOpsDir = state.opsDir;
+      void refreshKeys();
+    }
     const ready = Boolean(state.deployConfFound && state.opsDir && preflightPassed());
     // Dims the whole panel (including the log) when the form is shown but
     // not fillable yet — e.g. preflight failing. Not applied while the form
@@ -571,7 +592,6 @@ export function createDeployPanel(): { el: HTMLElement; render: () => void } {
     }
   }
 
-  void refreshKeys();
   void render();
   return { el, render: () => void render() };
 }

@@ -330,8 +330,8 @@ func (e wailsEmitter) EmitExit(event string, info scriptrunner.ExitInfo) {
 	runtime.EventsEmit(e.ctx, event, info)
 }
 
-func (a *App) ListSSHKeys() ([]string, error) {
-	return scriptrunner.ListSSHKeys()
+func (a *App) ListSSHKeys(opsDir string) ([]string, error) {
+	return scriptrunner.ListSSHKeys(opsDir)
 }
 
 // ListAvailableTiers returns the price tiers create.sh reports as available

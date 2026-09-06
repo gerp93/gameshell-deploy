@@ -164,7 +164,14 @@ else
 				echo "SSH Key Name: $SSH_KEY_NAME (from --ssh-key)"
 			else
 				echo "Which of the following SSH Keys was attached to the database droplet?"
-				doctl compute ssh-key list --format=Name --no-header
+				echo "(Only keys that also exist on this computer — ~/.ssh or ssh-agent — are listed.)"
+				LOCAL_DO_KEYS=$("$OPS_DIR/create.sh" --list-ssh-keys)
+				if [[ -z "$LOCAL_DO_KEYS" ]]; then
+					echo "No DigitalOcean SSH keys match a key on this machine."
+					echo "Add this PC's public key to the droplet (and the DigitalOcean account), or skip the backup to tear down without SSH."
+					exit 1
+				fi
+				printf '%s\n' "$LOCAL_DO_KEYS"
 				read -p "SSH Key Name: " SSH_KEY_NAME
 			fi
 			if [[ -z "$SSH_KEY_NAME" ]]; then
@@ -184,6 +191,7 @@ else
 				continue
 			elif [[ "$SSH_KEY_MATCH_COUNT" -eq 1 ]]; then
 				SSH_KEY_ID=$(printf '%s\n' "$SSH_KEY_MATCHES" | cut -d ' ' -f 1)
+				SSH_KEY_RESOLVED_NAME=$(printf '%s\n' "$SSH_KEY_MATCHES" | awk '{print $2}')
 				break
 			fi
 
@@ -196,6 +204,7 @@ else
 			SSH_KEY_EXACT_COUNT=$(printf '%s\n' "$SSH_KEY_EXACT" | grep -c '.' || true)
 			if [[ "$SSH_KEY_EXACT_COUNT" -eq 1 ]]; then
 				SSH_KEY_ID=$(printf '%s\n' "$SSH_KEY_EXACT" | cut -d ' ' -f 1)
+				SSH_KEY_RESOLVED_NAME=$(printf '%s\n' "$SSH_KEY_EXACT" | awk '{print $2}')
 				break
 			fi
 
@@ -207,6 +216,12 @@ else
 			fi
 			echo "Type one of the names above exactly."
 		done
+
+		if ! "$OPS_DIR/create.sh" --list-ssh-keys | grep -qxF "$SSH_KEY_RESOLVED_NAME"; then
+			echo "DigitalOcean SSH key \"$SSH_KEY_RESOLVED_NAME\" is not on this machine (no matching ~/.ssh/*.pub or ssh-agent identity)."
+			echo "Copy the private key here, or skip the backup to tear down without SSH."
+			exit 1
+		fi
 
 		# Pin ssh/scp to the local identity that matches this DigitalOcean
 		# public key. ssh will otherwise try every key in the agent; with
