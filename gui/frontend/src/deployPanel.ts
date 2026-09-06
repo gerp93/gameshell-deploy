@@ -337,6 +337,24 @@ export function createDeployPanel(): { el: HTMLElement; render: () => void } {
   actionRow.className = "row";
   actionRow.append(openBackupsButton, deployButton);
 
+  // Shown instead of the form once a failed deploy has been torn down — see
+  // the "resolved" case in render() below. Clearing the run here is an
+  // explicit operator action (as opposed to teardownPanel.ts clearing it
+  // automatically), so the failure stays visible — summary, params, and
+  // log — until the operator has actually looked at it and is ready to
+  // fill in a fresh attempt.
+  const startNewRow = document.createElement("div");
+  startNewRow.className = "row";
+  const startNewButton = document.createElement("button");
+  startNewButton.type = "button";
+  startNewButton.className = "secondary";
+  startNewButton.textContent = "Start New Deploy";
+  startNewButton.onclick = () => {
+    clearGameRun("create", state.appName);
+    notify();
+  };
+  startNewRow.append(startNewButton);
+
   const runSummary = createRunSummary("create");
 
   // Everything the operator fills in — hidden while a run is in flight, so
@@ -353,6 +371,7 @@ export function createDeployPanel(): { el: HTMLElement; render: () => void } {
     rememberWrap,
     backupWarning,
     actionRow,
+    startNewRow,
     runSummary.el,
     logPane.el,
   );
@@ -514,8 +533,18 @@ export function createDeployPanel(): { el: HTMLElement; render: () => void } {
     logPane.showGame(state.appName);
     runSummary.render(state.appName, { running: "Deploying", done: "Deployed" });
     rebuildExtraEnvFields();
-    const hideForm = running || (deployed && !failedCreate);
+    // A failed create whose cloud resources have since been torn down
+    // (teardownPanel.ts keeps this record instead of clearing it — see its
+    // comment) is its own state: distinct from a failed create that still
+    // has a droplet sitting around (form stays usable there, unchanged), and
+    // from a fresh/never-run game (form should just show). Here the operator
+    // has already cleaned up; showing the fillable form back immediately
+    // reads as "nothing happened" and invites hitting Deploy again without
+    // ever having seen why it failed. Start New Deploy is the one way out.
+    const resolved = failedCreate && !deployed;
+    const hideForm = running || (deployed && !failedCreate) || resolved;
     for (const part of formParts) part.style.display = hideForm ? "none" : "";
+    startNewRow.style.display = resolved ? "" : "none";
 
     // Skip the availability checks entirely while the form is hidden — a
     // run in flight, or a finished create whose log we're still showing.

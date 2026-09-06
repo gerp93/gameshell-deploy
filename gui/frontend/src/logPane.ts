@@ -23,8 +23,21 @@ function exitText(info: { code: number; err?: string }): string {
 // tracked separately (see state.ts), so a game's Deploy log never shows its
 // past Teardown output or vice versa.
 export function createLogPane(kind: RunKind, onFinished: (info: ExitInfo) => void): LogPane {
+  const wrap = document.createElement("div");
+
+  const header = document.createElement("div");
+  header.className = "log-pane-header";
+  const copyButton = document.createElement("button");
+  copyButton.type = "button";
+  copyButton.className = "icon-button";
+  copyButton.title = "Copy log to clipboard";
+  copyButton.textContent = "⧉";
+  header.appendChild(copyButton);
+
   const el = document.createElement("div");
   el.className = "log-pane";
+
+  wrap.append(header, el);
 
   let currentApp = "";
 
@@ -47,6 +60,33 @@ export function createLogPane(kind: RunKind, onFinished: (info: ExitInfo) => voi
     el.scrollTop = el.scrollHeight;
   }
 
+  // Built from the same buffered history the log is drawn from, rather than
+  // reading el.innerText — innerText's line breaks depend on the element
+  // actually being laid out/visible, which a hidden (display:none) panel
+  // isn't guaranteed to be.
+  function currentText(): string {
+    const run = getGameRun(kind, currentApp);
+    const parts = run.lines.map((line) => line.text);
+    if (run.lastExit) parts.push(exitText(run.lastExit));
+    return parts.join("\n");
+  }
+
+  copyButton.onclick = () => {
+    navigator.clipboard.writeText(currentText()).then(
+      () => {
+        copyButton.textContent = "✓";
+        copyButton.title = "Copied";
+        setTimeout(() => {
+          copyButton.textContent = "⧉";
+          copyButton.title = "Copy log to clipboard";
+        }, 1200);
+      },
+      () => {
+        copyButton.title = "Couldn't copy — clipboard access unavailable";
+      },
+    );
+  };
+
   onLine(kind, (line: LogLine) => {
     if (line.appName !== currentApp) return;
     appendRow(line.text, line.stream === "stderr");
@@ -62,7 +102,7 @@ export function createLogPane(kind: RunKind, onFinished: (info: ExitInfo) => voi
   });
 
   return {
-    el,
+    el: wrap,
     showGame(appName: string) {
       currentApp = appName;
       redraw();
