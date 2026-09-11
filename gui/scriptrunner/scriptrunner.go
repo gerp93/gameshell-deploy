@@ -251,19 +251,26 @@ func ListAvailableRegions(opsDir, appName string) ([]RegionOption, error) {
 	return regions, nil
 }
 
-// ListSSHKeys runs `doctl compute ssh-key list` (via WSL on Windows) and
-// returns the key names for the deploy- and teardown-panel dropdowns.
-func ListSSHKeys() ([]string, error) {
-	cmd, err := platform.RawCommand("doctl", []string{"compute", "ssh-key", "list", "--format=Name", "--no-header"})
+// ListSSHKeys runs `create.sh --list-ssh-keys` (via WSL on Windows) and
+// returns DigitalOcean key names that also exist on this machine (~/.ssh
+// or ssh-agent). Reusing the shell logic keeps the GUI dropdowns and the
+// CLI prompt on the same filtered list, so a key that only lives on
+// another PC cannot be selected here.
+func ListSSHKeys(opsDir string) ([]string, error) {
+	scriptPath := filepath.Join(opsDir, "create.sh")
+	cmd, err := platform.ScriptCommand(scriptPath, []string{"--list-ssh-keys"}, nil)
 	if err != nil {
 		return nil, err
 	}
 	out, err := cmd.Output()
 	if err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			return nil, fmt.Errorf("create.sh --list-ssh-keys failed: %s", strings.TrimSpace(string(exitErr.Stderr)))
+		}
 		return nil, err
 	}
 
-	var names []string
+	names := []string{}
 	scanner := bufio.NewScanner(bytes.NewReader(out))
 	for scanner.Scan() {
 		line := scanner.Text()

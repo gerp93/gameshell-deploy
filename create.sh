@@ -5,6 +5,7 @@
 # Usage:  ./create.sh APP_NAME [--ssh-key=NAME] [--tier=1|2|3] [--region=SLUG] [--yes]
 #         ./create.sh APP_NAME --list-tiers [--region=SLUG]
 #         ./create.sh APP_NAME --list-regions
+#         ./create.sh --list-ssh-keys
 #   APP_NAME is the game name (e.g., timeline-trivia, card-judge). Config and
 #   backups are read from games/APP_NAME/ relative to this script — deploy.conf
 #   (see deploy.conf.template) and a backups/ directory holding at least one
@@ -39,6 +40,11 @@
 #                   contract as --list-tiers. This is the same list the
 #                   interactive retry prompt below offers when the configured
 #                   region has no tiers available.
+#   --list-ssh-keys print DigitalOcean SSH key names that also exist on this
+#                   machine (matching ~/.ssh/*.pub or ssh-agent) and exit.
+#                   No APP_NAME needed — this is the list the GUI dropdowns
+#                   and the interactive SSH key prompt use, so a key that
+#                   is only on another PC cannot be selected here.
 #
 # Operator secrets come from the environment (game-agnostic):
 #   DEPLOY_SQL_USER      database user to create on the droplet
@@ -65,6 +71,33 @@ set -e # exit on any command error
 
 OPS_DIR="$(cd "$(dirname "$0")" && pwd)"
 
+# Prints DigitalOcean SSH key names whose public-key blob also exists on
+# this machine, either as ~/.ssh/*.pub or loaded in ssh-agent. awk (not
+# cut) splits doctl's ID/Name/PublicKey columns because PublicKey contains
+# spaces (`ssh-ed25519 AAAA… comment`) and awk collapses the padding doctl
+# uses between columns. $1=name $2=type $3=blob when format is Name,PublicKey.
+print_local_do_ssh_keys() {
+	local blobs
+	blobs=$(
+		{
+			for pub in "$HOME"/.ssh/*.pub; do
+				[[ -f "$pub" ]] || continue
+				awk '{print $2}' "$pub"
+			done
+			ssh-add -L 2>/dev/null | awk '{print $2}' || true
+		} | grep -v '^$' | sort -u || true
+	)
+	[[ -n "$blobs" ]] || return 0
+	doctl compute ssh-key list --format=Name,PublicKey --no-header | while IFS= read -r line || [[ -n "$line" ]]; do
+		[[ -n "$line" ]] || continue
+		blob=$(printf '%s\n' "$line" | awk '{print $3}')
+		[[ -n "$blob" ]] || continue
+		if printf '%s\n' "$blobs" | grep -qxF "$blob"; then
+			printf '%s\n' "$(printf '%s\n' "$line" | awk '{print $1}')"
+		fi
+	done
+}
+
 ################################################################################
 # parse args
 
@@ -74,6 +107,7 @@ REGION_FLAG=""
 AUTO_YES=0
 LIST_TIERS=0
 LIST_REGIONS=0
+LIST_SSH_KEYS=0
 APP_NAME_ARG=""
 for arg in "$@"; do
 	case "$arg" in
@@ -83,6 +117,7 @@ for arg in "$@"; do
 		--yes) AUTO_YES=1 ;;
 		--list-tiers) LIST_TIERS=1 ;;
 		--list-regions) LIST_REGIONS=1 ;;
+		--list-ssh-keys) LIST_SSH_KEYS=1 ;;
 		-*)
 			echo "Unknown option: $arg"
 			exit 1
@@ -90,6 +125,15 @@ for arg in "$@"; do
 		*) APP_NAME_ARG="$arg" ;;
 	esac
 done
+
+# --list-ssh-keys is account+local, not per-game: it must run before the
+# APP_NAME/deploy.conf checks so the GUI can fill the dropdown on startup
+# without a game selected.
+if [ "$LIST_SSH_KEYS" -eq 1 ]; then
+	print_local_do_ssh_keys
+	exit 0
+fi
+
 : "${APP_NAME_ARG:?Usage: ./create.sh APP_NAME [--ssh-key=NAME] [--tier=1|2|3] [--region=SLUG] [--yes] [--list-tiers] [--list-regions]}"
 GAME_CONFIG_DIR="$OPS_DIR/games/$APP_NAME_ARG"
 
@@ -574,7 +618,14 @@ while true; do
 		echo "SSH Key Name: $SSH_KEY_NAME (from --ssh-key)"
 	else
 		echo "Which of the following SSH Keys should have access to the database droplet?"
-		doctl compute ssh-key list --format=Name --no-header
+		echo "(Only keys that also exist on this computer — ~/.ssh or ssh-agent — are listed.)"
+		LOCAL_DO_KEYS=$(print_local_do_ssh_keys)
+		if [[ -z "$LOCAL_DO_KEYS" ]]; then
+			echo "No DigitalOcean SSH keys match a key on this machine."
+			echo "Add this PC's public key to the DigitalOcean account, or copy the matching private key into ~/.ssh / ssh-agent."
+			exit 1
+		fi
+		printf '%s\n' "$LOCAL_DO_KEYS"
 		read -p "SSH Key Name: " SSH_KEY_NAME
 	fi
 	if [[ -z "$SSH_KEY_NAME" ]]; then
@@ -593,6 +644,7 @@ while true; do
 		continue
 	elif [[ "$SSH_KEY_MATCH_COUNT" -eq 1 ]]; then
 		SSH_KEY_ID=$(printf '%s\n' "$SSH_KEY_MATCHES" | cut -d ' ' -f 1)
+		SSH_KEY_RESOLVED_NAME=$(printf '%s\n' "$SSH_KEY_MATCHES" | awk '{print $2}')
 		break
 	fi
 
@@ -606,6 +658,7 @@ while true; do
 	SSH_KEY_EXACT_COUNT=$(printf '%s\n' "$SSH_KEY_EXACT" | grep -c '.' || true)
 	if [[ "$SSH_KEY_EXACT_COUNT" -eq 1 ]]; then
 		SSH_KEY_ID=$(printf '%s\n' "$SSH_KEY_EXACT" | cut -d ' ' -f 1)
+		SSH_KEY_RESOLVED_NAME=$(printf '%s\n' "$SSH_KEY_EXACT" | awk '{print $2}')
 		break
 	fi
 
@@ -617,6 +670,12 @@ while true; do
 	fi
 	echo "Type one of the names above exactly."
 done
+
+if ! print_local_do_ssh_keys | grep -qxF "$SSH_KEY_RESOLVED_NAME"; then
+	echo "DigitalOcean SSH key \"$SSH_KEY_RESOLVED_NAME\" is not on this machine (no matching ~/.ssh/*.pub or ssh-agent identity)."
+	echo "Pick a key this computer can use, or copy the private key here."
+	exit 1
+fi
 
 ################################################################################
 # create droplet

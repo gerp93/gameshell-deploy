@@ -29,20 +29,32 @@ export function createTeardownPanel(): { el: HTMLElement; render: () => void } {
   refreshKeysButton.onclick = () => void refreshKeys();
   sshKeySelect.onchange = () => render();
   sshKeyRow.append(sshKeySelect, refreshKeysButton);
-  sshKeyWrap.append(sshKeyLabel, sshKeyRow);
+  const sshKeyHint = document.createElement("div");
+  sshKeyHint.className = "hint";
+  sshKeyWrap.append(sshKeyLabel, sshKeyRow, sshKeyHint);
+  let keysLoadedForOpsDir = "";
 
   async function refreshKeys() {
+    if (!state.opsDir) return;
+    const previously = sshKeySelect.value;
     sshKeySelect.innerHTML = "";
     try {
-      const keys = (await listSSHKeys()) ?? [];
+      const keys = (await listSSHKeys(state.opsDir)) ?? [];
       for (const key of keys) {
         const opt = document.createElement("option");
         opt.value = key;
         opt.textContent = key;
         sshKeySelect.appendChild(opt);
       }
+      if (previously && keys.includes(previously)) {
+        sshKeySelect.value = previously;
+      }
+      sshKeyHint.textContent =
+        keys.length > 0
+          ? "Only keys that exist both on this DigitalOcean account and on this computer (~/.ssh or ssh-agent)."
+          : "None of this account's SSH keys are on this computer. Add this PC's public key to DigitalOcean, or copy the matching private key into ~/.ssh. Skip backup to tear down without SSH.";
     } catch {
-      // doctl unavailable — Teardown stays disabled while backup is on.
+      sshKeyHint.textContent = "Could not list SSH keys.";
     }
     render();
   }
@@ -273,6 +285,10 @@ export function createTeardownPanel(): { el: HTMLElement; render: () => void } {
     if (!running) {
       applyGPGVisibility();
       void fillGPGFromKeyring();
+      if (state.opsDir && keysLoadedForOpsDir !== state.opsDir) {
+        keysLoadedForOpsDir = state.opsDir;
+        void refreshKeys();
+      }
     }
 
     const ready = Boolean(state.opsDir && preflightPassed());
@@ -287,7 +303,6 @@ export function createTeardownPanel(): { el: HTMLElement; render: () => void } {
     status.textContent = preflightPassed() ? "" : "Fix the failing Prerequisites checks above before tearing down.";
   }
 
-  void refreshKeys();
   render();
   return { el, render };
 }

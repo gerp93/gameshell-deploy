@@ -137,7 +137,7 @@ export const saveDeployConf = (opsDir: string, appName: string, conf: DeployConf
   Backend.SaveDeployConf(opsDir, appName, conf);
 
 export const runPreflightChecks = (): Promise<PreflightResult> => Backend.RunPreflightChecks();
-export const listSSHKeys = (): Promise<string[]> => Backend.ListSSHKeys();
+export const listSSHKeys = (opsDir: string): Promise<string[]> => Backend.ListSSHKeys(opsDir);
 export const listAvailableTiers = (opsDir: string, appName: string, region: string): Promise<TierOption[]> =>
   Backend.ListAvailableTiers(opsDir, appName, region);
 export const listAvailableRegions = (opsDir: string, appName: string): Promise<RegionOption[]> =>

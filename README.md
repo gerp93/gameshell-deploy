@@ -67,7 +67,9 @@ non-interactively — `create.sh` takes `--ssh-key=NAME`, `--tier=1|2|3`, and
 `--yes` (auto-confirms the fork-sync push); `delete.sh` takes
 `--backup=yes|no` and `--ssh-key=NAME` (which key to use for the
 pre-teardown database backup). Skip-backup teardown never SSHes, so
-`--ssh-key` is ignored when `--backup=no`. Omit any of them and the
+`--ssh-key` is ignored when `--backup=no`. Both the interactive prompts
+and the GUI dropdowns list only DigitalOcean keys that also exist on this
+machine (`create.sh --list-ssh-keys`). Omit any of the flags and the
 matching interactive prompt runs as normal.
 
 If `deploy.conf` sets `GIT_UPSTREAM` (a fork's upstream repo, `owner/name`),
