@@ -11,10 +11,17 @@ export interface Settings {
   rememberSecrets: boolean;
 }
 
+// The *Source fields are only meaningful on LoadSecrets' result — "env" or
+// "keyring", telling the operator where a pre-filled value came from. They
+// are absent (undefined) on a field with no pre-filled value, and ignored
+// when passed back into saveSecrets.
 export interface SecretsBundle {
   sqlUser: string;
+  sqlUserSource?: "env" | "keyring";
   sqlPassword: string;
+  sqlPasswordSource?: "env" | "keyring";
   gpgPassphrase: string;
+  gpgPassphraseSource?: "env" | "keyring";
   extraEnv: ExtraEnvVar[];
 }
 
@@ -86,6 +93,7 @@ export interface RegionOption {
 export interface ExtraEnvVar {
   key: string;
   value: string;
+  source?: "env" | "keyring";
 }
 
 export interface CreateRequest {

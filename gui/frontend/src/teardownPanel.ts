@@ -3,6 +3,7 @@ import { createLogPane } from "./logPane";
 import { refreshStatus, scheduleStatusReconcile } from "./appPanel";
 import { state, preflightPassed, isDeployed, isGameRunning, hasFailedExit, getGameRun, clearGameRun, notify } from "./state";
 import { createRunSummary } from "./runSummary";
+import { createSourceLabel, setSourceLabel } from "./secretSource";
 
 export function createTeardownPanel(): { el: HTMLElement; render: () => void } {
   const el = document.createElement("div");
@@ -80,8 +81,12 @@ export function createTeardownPanel(): { el: HTMLElement; render: () => void } {
   gpgPassphraseLabel.textContent = "GPG_PASSPHRASE (only if backing up)";
   const gpgPassphraseInput = document.createElement("input");
   gpgPassphraseInput.type = "password";
-  gpgPassphraseInput.oninput = () => render();
-  gpgPassphraseWrap.append(gpgPassphraseLabel, gpgPassphraseInput);
+  const gpgPassphraseSourceLabel = createSourceLabel();
+  gpgPassphraseInput.oninput = () => {
+    setSourceLabel(gpgPassphraseSourceLabel, undefined);
+    render();
+  };
+  gpgPassphraseWrap.append(gpgPassphraseLabel, gpgPassphraseInput, gpgPassphraseSourceLabel);
 
   // Teardown-only: a typo'd passphrase here silently GPG-encrypts the
   // backup with the wrong password before the droplet is gone, so there's
@@ -109,6 +114,7 @@ export function createTeardownPanel(): { el: HTMLElement; render: () => void } {
       if (bundle.gpgPassphrase && !gpgPassphraseInput.value) {
         gpgPassphraseInput.value = bundle.gpgPassphrase;
         gpgConfirmInput.value = bundle.gpgPassphrase;
+        setSourceLabel(gpgPassphraseSourceLabel, bundle.gpgPassphraseSource);
         render();
       }
     } catch {
@@ -190,6 +196,7 @@ export function createTeardownPanel(): { el: HTMLElement; render: () => void } {
     if (!s.rememberSecrets) {
       gpgPassphraseInput.value = "";
       gpgConfirmInput.value = "";
+      setSourceLabel(gpgPassphraseSourceLabel, undefined);
     }
     notify();
 
