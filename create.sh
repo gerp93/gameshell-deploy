@@ -71,28 +71,34 @@ set -e # exit on any command error
 
 OPS_DIR="$(cd "$(dirname "$0")" && pwd)"
 
-# Prints DigitalOcean SSH key names whose public-key blob also exists on
-# this machine, either as ~/.ssh/*.pub or loaded in ssh-agent. awk (not
-# cut) splits doctl's ID/Name/PublicKey columns because PublicKey contains
-# spaces (`ssh-ed25519 AAAA… comment`) and awk collapses the padding doctl
-# uses between columns. $1=name $2=type $3=blob when format is Name,PublicKey.
+# Prints DigitalOcean SSH key names whose key also exists on this machine,
+# either as ~/.ssh/*.pub or loaded in ssh-agent. Matches by MD5 fingerprint
+# (via ssh-keygen -lf), not by the raw public-key blob: doctl's
+# `compute ssh-key list` has no PublicKey column — asking for one via
+# --format doesn't error, it silently prints the literal string "<nil>" for
+# every row, which used to make this match nothing at all. FingerPrint is a
+# real column and ssh-keygen -E md5 produces the same colon-hex form doctl
+# reports it in.
 print_local_do_ssh_keys() {
-	local blobs
-	blobs=$(
+	local fingerprints
+	fingerprints=$(
 		{
 			for pub in "$HOME"/.ssh/*.pub; do
 				[[ -f "$pub" ]] || continue
-				awk '{print $2}' "$pub"
+				ssh-keygen -lf "$pub" -E md5 2>/dev/null | awk '{print $2}'
 			done
-			ssh-add -L 2>/dev/null | awk '{print $2}' || true
-		} | grep -v '^$' | sort -u || true
+			while IFS= read -r identity || [[ -n "$identity" ]]; do
+				[[ -n "$identity" ]] || continue
+				printf '%s\n' "$identity" | ssh-keygen -lf - -E md5 2>/dev/null | awk '{print $2}'
+			done < <(ssh-add -L 2>/dev/null || true)
+		} | sed 's/^MD5://' | grep -v '^$' | sort -u || true
 	)
-	[[ -n "$blobs" ]] || return 0
-	doctl compute ssh-key list --format=Name,PublicKey --no-header | while IFS= read -r line || [[ -n "$line" ]]; do
+	[[ -n "$fingerprints" ]] || return 0
+	doctl compute ssh-key list --format=Name,FingerPrint --no-header | while IFS= read -r line || [[ -n "$line" ]]; do
 		[[ -n "$line" ]] || continue
-		blob=$(printf '%s\n' "$line" | awk '{print $3}')
-		[[ -n "$blob" ]] || continue
-		if printf '%s\n' "$blobs" | grep -qxF "$blob"; then
+		fp=$(printf '%s\n' "$line" | awk '{print $2}')
+		[[ -n "$fp" ]] || continue
+		if printf '%s\n' "$fingerprints" | grep -qxF "$fp"; then
 			printf '%s\n' "$(printf '%s\n' "$line" | awk '{print $1}')"
 		fi
 	done
