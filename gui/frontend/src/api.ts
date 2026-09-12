@@ -11,18 +11,19 @@ export interface Settings {
   rememberSecrets: boolean;
 }
 
-// The *Source fields are only meaningful on LoadSecrets' result — "env" or
-// "keyring", telling the operator where a pre-filled value came from. They
-// are absent (undefined) on a field with no pre-filled value, and ignored
-// when passed back into saveSecrets.
 export interface SecretsBundle {
   sqlUser: string;
-  sqlUserSource?: "env" | "keyring";
   sqlPassword: string;
-  sqlPasswordSource?: "env" | "keyring";
   gpgPassphrase: string;
-  gpgPassphraseSource?: "env" | "keyring";
   extraEnv: ExtraEnvVar[];
+}
+
+// loadSecrets returns both possible sources unmerged, rather than picking a
+// winner, so the GUI can offer a choice when both an environment variable
+// and a keyring entry exist for the same secret (and disagree).
+export interface LoadedSecrets {
+  env: SecretsBundle;
+  keyring: SecretsBundle;
 }
 
 export interface DeployConf {
@@ -93,7 +94,6 @@ export interface RegionOption {
 export interface ExtraEnvVar {
   key: string;
   value: string;
-  source?: "env" | "keyring";
 }
 
 export interface CreateRequest {
@@ -121,8 +121,8 @@ export interface DeleteRequest {
 
 export const loadSettings = (): Promise<Settings> => Backend.LoadSettings();
 export const setRememberSecrets = (remember: boolean): Promise<void> => Backend.SetRememberSecrets(remember);
-export const loadSecrets = (extraNames: string[]): Promise<SecretsBundle> =>
-  Backend.LoadSecrets(extraNames) as Promise<SecretsBundle>;
+export const loadSecrets = (extraNames: string[]): Promise<LoadedSecrets> =>
+  Backend.LoadSecrets(extraNames) as Promise<LoadedSecrets>;
 export const saveSecrets = (bundle: SecretsBundle): Promise<void> =>
   Backend.SaveSecrets(bundle as never);
 export const forgetSecrets = (extraNames: string[]): Promise<void> => Backend.ForgetSecrets(extraNames);

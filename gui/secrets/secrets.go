@@ -21,36 +21,32 @@ const (
 	extraPrefix      = "extra:"
 )
 
-// Where a pre-filled secret value came from, as reported by Merge — shown in
-// the GUI so the operator isn't guessing whether a field holds a saved
-// keyring value or a (possibly stale) environment variable.
-const (
-	SourceEnv     = "env"
-	SourceKeyring = "keyring"
-)
-
 // ExtraEnvVar is one extra secret. A slice rather than map[string]string
 // because Wails' generated TS models omit map fields, so maps never survive
 // the frontend → Go round-trip (the same reason scriptrunner.CreateRequest
-// uses a slice). Source is only meaningful on Merge's output; Load/FromEnv
-// leave it blank and Save ignores it.
+// uses a slice).
 type ExtraEnvVar struct {
-	Key    string `json:"key"`
-	Value  string `json:"value"`
-	Source string `json:"source,omitempty"`
+	Key   string `json:"key"`
+	Value string `json:"value"`
 }
 
 // Bundle is the set of secrets the Deploy/Teardown panels can remember.
 // ExtraEnv is keyed by the resolved env var name (e.g. TRACK_TIMELINE_YT_API_KEY).
-// The *Source fields are only meaningful on Merge's output (see ExtraEnvVar).
 type Bundle struct {
-	SQLUser             string        `json:"sqlUser"`
-	SQLUserSource       string        `json:"sqlUserSource,omitempty"`
-	SQLPassword         string        `json:"sqlPassword"`
-	SQLPasswordSource   string        `json:"sqlPasswordSource,omitempty"`
-	GPGPassphrase       string        `json:"gpgPassphrase"`
-	GPGPassphraseSource string        `json:"gpgPassphraseSource,omitempty"`
-	ExtraEnv            []ExtraEnvVar `json:"extraEnv"`
+	SQLUser       string        `json:"sqlUser"`
+	SQLPassword   string        `json:"sqlPassword"`
+	GPGPassphrase string        `json:"gpgPassphrase"`
+	ExtraEnv      []ExtraEnvVar `json:"extraEnv"`
+}
+
+// LoadedSecrets carries a field's value from each possible source
+// separately, rather than pre-picking a winner: when an environment
+// variable and a keyring entry both exist for the same secret (and
+// disagree), the GUI lets the operator choose which one to use instead of
+// always silently preferring one — see LoadSecrets in app.go.
+type LoadedSecrets struct {
+	Env     Bundle `json:"env"`
+	Keyring Bundle `json:"keyring"`
 }
 
 // Load reads stored secrets. Missing keyring items are empty strings, not
@@ -181,57 +177,3 @@ func FromEnv(extraNames []string) Bundle {
 	return b
 }
 
-// Merge prefers non-empty fields from preferred, filling gaps from fallback.
-// Only called from LoadSecrets with preferred=FromEnv's result and
-// fallback=Load's (keyring) result, so a value that wins from preferred is
-// stamped SourceEnv and one that wins from fallback is stamped SourceKeyring
-// — that labeling is baked in here rather than taking labels as parameters
-// since this is the only caller.
-func Merge(preferred, fallback Bundle) Bundle {
-	out := fallback
-	out.ExtraEnv = append([]ExtraEnvVar(nil), fallback.ExtraEnv...)
-	if out.SQLUser != "" {
-		out.SQLUserSource = SourceKeyring
-	}
-	if out.SQLPassword != "" {
-		out.SQLPasswordSource = SourceKeyring
-	}
-	if out.GPGPassphrase != "" {
-		out.GPGPassphraseSource = SourceKeyring
-	}
-	for i := range out.ExtraEnv {
-		if out.ExtraEnv[i].Value != "" {
-			out.ExtraEnv[i].Source = SourceKeyring
-		}
-	}
-
-	if preferred.SQLUser != "" {
-		out.SQLUser = preferred.SQLUser
-		out.SQLUserSource = SourceEnv
-	}
-	if preferred.SQLPassword != "" {
-		out.SQLPassword = preferred.SQLPassword
-		out.SQLPasswordSource = SourceEnv
-	}
-	if preferred.GPGPassphrase != "" {
-		out.GPGPassphrase = preferred.GPGPassphrase
-		out.GPGPassphraseSource = SourceEnv
-	}
-	byKey := map[string]int{}
-	for i, ev := range out.ExtraEnv {
-		byKey[ev.Key] = i
-	}
-	for _, ev := range preferred.ExtraEnv {
-		if ev.Value == "" {
-			continue
-		}
-		ev.Source = SourceEnv
-		if i, ok := byKey[ev.Key]; ok {
-			out.ExtraEnv[i] = ev
-		} else {
-			byKey[ev.Key] = len(out.ExtraEnv)
-			out.ExtraEnv = append(out.ExtraEnv, ev)
-		}
-	}
-	return out
-}

@@ -150,15 +150,17 @@ func (a *App) SetRememberSecrets(remember bool) error {
 	return settings.Save(s)
 }
 
-// LoadSecrets fills SQL/GPG/extra values from the environment first (same
-// names as the CLI), then from the OS keyring for anything still empty.
-func (a *App) LoadSecrets(extraNames []string) (secrets.Bundle, error) {
+// LoadSecrets reads SQL/GPG/extra values from both the environment (same
+// names as the CLI) and the OS keyring, without picking a winner — see
+// secrets.LoadedSecrets. The GUI decides per field: use whichever side has
+// a value, or offer a choice when both do and disagree.
+func (a *App) LoadSecrets(extraNames []string) (secrets.LoadedSecrets, error) {
 	env := secrets.FromEnv(extraNames)
 	stored, err := secrets.Load(extraNames)
 	if err != nil {
-		return env, nil
+		return secrets.LoadedSecrets{Env: env}, nil
 	}
-	return secrets.Merge(env, stored), nil
+	return secrets.LoadedSecrets{Env: env, Keyring: stored}, nil
 }
 
 // SaveSecrets writes non-empty fields to the OS keyring. Empty fields are

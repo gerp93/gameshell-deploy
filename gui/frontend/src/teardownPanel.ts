@@ -3,7 +3,7 @@ import { createLogPane } from "./logPane";
 import { refreshStatus, scheduleStatusReconcile } from "./appPanel";
 import { state, preflightPassed, isDeployed, isGameRunning, hasFailedExit, getGameRun, clearGameRun, notify } from "./state";
 import { createRunSummary } from "./runSummary";
-import { createSourceLabel, setSourceLabel } from "./secretSource";
+import { createSecretField } from "./secretField";
 
 export function createTeardownPanel(): { el: HTMLElement; render: () => void } {
   const el = document.createElement("div");
@@ -75,18 +75,21 @@ export function createTeardownPanel(): { el: HTMLElement; render: () => void } {
   backupNo.value = "no";
   backupNo.onchange = () => updateGPGVisibility();
 
-  const gpgPassphraseWrap = document.createElement("div");
-  gpgPassphraseWrap.className = "field";
-  const gpgPassphraseLabel = document.createElement("label");
-  gpgPassphraseLabel.textContent = "GPG_PASSPHRASE (only if backing up)";
-  const gpgPassphraseInput = document.createElement("input");
-  gpgPassphraseInput.type = "password";
-  const gpgPassphraseSourceLabel = createSourceLabel();
-  gpgPassphraseInput.oninput = () => {
-    setSourceLabel(gpgPassphraseSourceLabel, undefined);
-    render();
-  };
-  gpgPassphraseWrap.append(gpgPassphraseLabel, gpgPassphraseInput, gpgPassphraseSourceLabel);
+  const gpgPassphraseField = createSecretField(
+    "GPG_PASSPHRASE (only if backing up)",
+    "password",
+    () => render(),
+    // A source-selected value (initial pre-fill, or switching the radio)
+    // is trusted and known correct, so it's fine to also fill the confirm
+    // field — unlike manual typing, which the confirm field exists to
+    // double-check.
+    () => {
+      gpgConfirmInput.value = gpgPassphraseField.input.value;
+      render();
+    },
+  );
+  const gpgPassphraseWrap = gpgPassphraseField.wrap;
+  const gpgPassphraseInput = gpgPassphraseField.input;
 
   // Teardown-only: a typo'd passphrase here silently GPG-encrypts the
   // backup with the wrong password before the droplet is gone, so there's
@@ -110,13 +113,8 @@ export function createTeardownPanel(): { el: HTMLElement; render: () => void } {
     if (gpgKeyringTried || gpgPassphraseInput.value) return;
     gpgKeyringTried = true;
     try {
-      const bundle = await loadSecrets([]);
-      if (bundle.gpgPassphrase && !gpgPassphraseInput.value) {
-        gpgPassphraseInput.value = bundle.gpgPassphrase;
-        gpgConfirmInput.value = bundle.gpgPassphrase;
-        setSourceLabel(gpgPassphraseSourceLabel, bundle.gpgPassphraseSource);
-        render();
-      }
+      const { env, keyring } = await loadSecrets([]);
+      gpgPassphraseField.applyLoaded(env.gpgPassphrase ?? "", keyring.gpgPassphrase ?? "");
     } catch {
       // Keyring unavailable — type the passphrase this run.
     }
@@ -194,9 +192,8 @@ export function createTeardownPanel(): { el: HTMLElement; render: () => void } {
       }
     }
     if (!s.rememberSecrets) {
-      gpgPassphraseInput.value = "";
+      gpgPassphraseField.reset();
       gpgConfirmInput.value = "";
-      setSourceLabel(gpgPassphraseSourceLabel, undefined);
     }
     notify();
 

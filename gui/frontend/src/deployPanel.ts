@@ -19,7 +19,7 @@ import { refreshStatus, scheduleStatusReconcile } from "./appPanel";
 import { state, preflightPassed, isDeployed, isGameRunning, hasFailedExit, hasCreateLog, getGameRun, clearGameRun, notify } from "./state";
 import { createRunSummary } from "./runSummary";
 import { resolveExtraEnvNames } from "./extraEnv";
-import { createSourceLabel, setSourceLabel } from "./secretSource";
+import { createSecretField, type SecretField } from "./secretField";
 
 export function createDeployPanel(): { el: HTMLElement; render: () => void } {
   const el = document.createElement("div");
@@ -84,40 +84,13 @@ export function createDeployPanel(): { el: HTMLElement; render: () => void } {
   let tierCheckToken = 0;
   tierWrap.append(tierLabelRow, tierWrapper, tierStatus);
 
-  const sqlUserWrap = document.createElement("div");
-  sqlUserWrap.className = "field";
-  const sqlUserLabel = document.createElement("label");
-  sqlUserLabel.textContent = "DEPLOY_SQL_USER";
-  const sqlUserInput = document.createElement("input");
-  const sqlUserSourceLabel = createSourceLabel();
-  sqlUserInput.oninput = () => {
-    setSourceLabel(sqlUserSourceLabel, undefined);
-    void render();
-  };
-  sqlUserWrap.append(sqlUserLabel, sqlUserInput, sqlUserSourceLabel);
-
-  const sqlPasswordWrap = document.createElement("div");
-  sqlPasswordWrap.className = "field";
-  const sqlPasswordLabel = document.createElement("label");
-  sqlPasswordLabel.textContent = "DEPLOY_SQL_PASSWORD";
-  const sqlPasswordInput = document.createElement("input");
-  sqlPasswordInput.type = "password";
-  const sqlPasswordSourceLabel = createSourceLabel();
-  sqlPasswordInput.oninput = () => {
-    setSourceLabel(sqlPasswordSourceLabel, undefined);
-    void render();
-  };
-  sqlPasswordWrap.append(sqlPasswordLabel, sqlPasswordInput, sqlPasswordSourceLabel);
-
-  const gpgPassphraseWrap = document.createElement("div");
-  gpgPassphraseWrap.className = "field";
-  const gpgPassphraseLabel = document.createElement("label");
-  gpgPassphraseLabel.textContent = "GPG_PASSPHRASE (only if restoring a backup)";
-  const gpgPassphraseInput = document.createElement("input");
-  gpgPassphraseInput.type = "password";
-  const gpgPassphraseSourceLabel = createSourceLabel();
-  gpgPassphraseInput.oninput = () => setSourceLabel(gpgPassphraseSourceLabel, undefined);
-  gpgPassphraseWrap.append(gpgPassphraseLabel, gpgPassphraseInput, gpgPassphraseSourceLabel);
+  const sqlUserField = createSecretField("DEPLOY_SQL_USER", "text", () => void render());
+  const sqlPasswordField = createSecretField("DEPLOY_SQL_PASSWORD", "password", () => void render());
+  const gpgPassphraseField = createSecretField(
+    "GPG_PASSPHRASE (only if restoring a backup)",
+    "password",
+    () => void render(),
+  );
 
   // Extra secrets named in deploy.conf EXTRA_ENV_VARS — names are not
   // secret and come from config; values are typed here at deploy time.
@@ -126,8 +99,7 @@ export function createDeployPanel(): { el: HTMLElement; render: () => void } {
   const extraEnvWrap = document.createElement("div");
   extraEnvWrap.className = "field-grid";
   extraEnvWrap.style.display = "none";
-  const extraEnvInputs = new Map<string, HTMLInputElement>();
-  const extraEnvSourceLabels = new Map<string, HTMLElement>();
+  const extraEnvFields = new Map<string, SecretField>();
   let extraEnvFor = "";
 
   function extraEnvNames(): string[] {
@@ -143,52 +115,26 @@ export function createDeployPanel(): { el: HTMLElement; render: () => void } {
     if (key === extraEnvFor) return;
     extraEnvFor = key;
     extraEnvWrap.innerHTML = "";
-    extraEnvInputs.clear();
-    extraEnvSourceLabels.clear();
+    extraEnvFields.clear();
     extraEnvWrap.style.display = names.length ? "" : "none";
     for (const name of names) {
-      const wrap = document.createElement("div");
-      wrap.className = "field";
-      const label = document.createElement("label");
-      label.textContent = name;
-      const input = document.createElement("input");
-      input.type = "password";
-      const sourceLabel = createSourceLabel();
-      input.oninput = () => {
-        setSourceLabel(sourceLabel, undefined);
-        void render();
-      };
-      wrap.append(label, input, sourceLabel);
-      extraEnvWrap.appendChild(wrap);
-      extraEnvInputs.set(name, input);
-      extraEnvSourceLabels.set(name, sourceLabel);
+      const field = createSecretField(name, "password", () => void render());
+      extraEnvWrap.appendChild(field.wrap);
+      extraEnvFields.set(name, field);
     }
     void fillSecrets();
   }
 
   async function fillSecrets() {
     try {
-      const bundle = await loadSecrets(extraEnvNames());
-      if (!sqlUserInput.value) {
-        sqlUserInput.value = bundle.sqlUser ?? "";
-        setSourceLabel(sqlUserSourceLabel, bundle.sqlUserSource);
-      }
-      if (!sqlPasswordInput.value) {
-        sqlPasswordInput.value = bundle.sqlPassword ?? "";
-        setSourceLabel(sqlPasswordSourceLabel, bundle.sqlPasswordSource);
-      }
-      if (!gpgPassphraseInput.value) {
-        gpgPassphraseInput.value = bundle.gpgPassphrase ?? "";
-        setSourceLabel(gpgPassphraseSourceLabel, bundle.gpgPassphraseSource);
-      }
-      const extras = bundle.extraEnv ?? [];
-      for (const ev of extras) {
-        const input = extraEnvInputs.get(ev.key);
-        if (input && !input.value && ev.value) {
-          input.value = ev.value;
-          const sourceLabel = extraEnvSourceLabels.get(ev.key);
-          if (sourceLabel) setSourceLabel(sourceLabel, ev.source);
-        }
+      const { env, keyring } = await loadSecrets(extraEnvNames());
+      sqlUserField.applyLoaded(env.sqlUser ?? "", keyring.sqlUser ?? "");
+      sqlPasswordField.applyLoaded(env.sqlPassword ?? "", keyring.sqlPassword ?? "");
+      gpgPassphraseField.applyLoaded(env.gpgPassphrase ?? "", keyring.gpgPassphrase ?? "");
+      const envByKey = new Map((env.extraEnv ?? []).map((ev) => [ev.key, ev.value]));
+      const keyringByKey = new Map((keyring.extraEnv ?? []).map((ev) => [ev.key, ev.value]));
+      for (const [name, field] of extraEnvFields) {
+        field.applyLoaded(envByKey.get(name) ?? "", keyringByKey.get(name) ?? "");
       }
       void render();
     } catch {
@@ -210,7 +156,7 @@ export function createDeployPanel(): { el: HTMLElement; render: () => void } {
   const rememberHint = document.createElement("p");
   rememberHint.className = "hint";
   rememberHint.textContent =
-    "Empty fields are filled from your environment (DEPLOY_SQL_USER, extra API keys, GPG_PASSPHRASE) if set — including WSL on Windows. Check the box to also save them in the OS keychain, not in the repo or deploy.conf.";
+    "Empty fields are filled from your environment (DEPLOY_SQL_USER, extra API keys, GPG_PASSPHRASE) if set — including WSL on Windows — or from the OS keychain if you've saved one here before; if both have a value and they differ, pick which one to use. Check the box to save what you type or pick here, in the OS keychain, not in the repo or deploy.conf.";
   const rememberStatus = document.createElement("div");
   rememberStatus.className = "status-line";
   const forgetButton = document.createElement("button");
@@ -226,23 +172,19 @@ export function createDeployPanel(): { el: HTMLElement; render: () => void } {
     void setRememberSecrets(rememberCheck.checked).catch((err) => {
       rememberStatus.textContent = `Couldn't save preference: ${err instanceof Error ? err.message : String(err)}`;
     });
+    sqlUserField.refreshTypedHint(rememberCheck.checked);
+    sqlPasswordField.refreshTypedHint(rememberCheck.checked);
+    gpgPassphraseField.refreshTypedHint(rememberCheck.checked);
+    for (const field of extraEnvFields.values()) field.refreshTypedHint(rememberCheck.checked);
   };
   forgetButton.onclick = async () => {
     rememberStatus.textContent = "";
     try {
       await forgetSecrets(extraEnvNames());
-      sqlUserInput.value = "";
-      sqlPasswordInput.value = "";
-      gpgPassphraseInput.value = "";
-      setSourceLabel(sqlUserSourceLabel, undefined);
-      setSourceLabel(sqlPasswordSourceLabel, undefined);
-      setSourceLabel(gpgPassphraseSourceLabel, undefined);
-      for (const input of extraEnvInputs.values()) {
-        input.value = "";
-      }
-      for (const sourceLabel of extraEnvSourceLabels.values()) {
-        setSourceLabel(sourceLabel, undefined);
-      }
+      sqlUserField.reset();
+      sqlPasswordField.reset();
+      gpgPassphraseField.reset();
+      for (const field of extraEnvFields.values()) field.reset();
       rememberStatus.textContent = "Saved secrets removed from the OS keychain.";
       void render();
     } catch (err) {
@@ -308,12 +250,12 @@ export function createDeployPanel(): { el: HTMLElement; render: () => void } {
     const appName = state.appName;
     const tier = tierInputs.find((i) => i.checked)?.value ?? "";
     const sshKeyName = sshKeySelect.value;
-    const sqlUser = sqlUserInput.value;
-    const sqlPassword = sqlPasswordInput.value;
-    const gpgPassphrase = gpgPassphraseInput.value;
+    const sqlUser = sqlUserField.input.value;
+    const sqlPassword = sqlPasswordField.input.value;
+    const gpgPassphrase = gpgPassphraseField.input.value;
     const extraEnv: ExtraEnvVar[] = [];
-    for (const [name, input] of extraEnvInputs) {
-      extraEnv.push({ key: name, value: input.value });
+    for (const [name, field] of extraEnvFields) {
+      extraEnv.push({ key: name, value: field.input.value });
     }
 
     if (rememberCheck.checked) {
@@ -346,18 +288,10 @@ export function createDeployPanel(): { el: HTMLElement; render: () => void } {
     // Drop secrets from the DOM unless they were just written to the OS
     // keychain — then they stay filled so a retry doesn't require retyping.
     if (!rememberCheck.checked) {
-      sqlUserInput.value = "";
-      sqlPasswordInput.value = "";
-      gpgPassphraseInput.value = "";
-      setSourceLabel(sqlUserSourceLabel, undefined);
-      setSourceLabel(sqlPasswordSourceLabel, undefined);
-      setSourceLabel(gpgPassphraseSourceLabel, undefined);
-      for (const input of extraEnvInputs.values()) {
-        input.value = "";
-      }
-      for (const sourceLabel of extraEnvSourceLabels.values()) {
-        setSourceLabel(sourceLabel, undefined);
-      }
+      sqlUserField.reset();
+      sqlPasswordField.reset();
+      gpgPassphraseField.reset();
+      for (const field of extraEnvFields.values()) field.reset();
     }
     notify();
 
@@ -377,7 +311,7 @@ export function createDeployPanel(): { el: HTMLElement; render: () => void } {
 
   const credsGrid = document.createElement("div");
   credsGrid.className = "field-grid";
-  credsGrid.append(sqlUserWrap, sqlPasswordWrap, gpgPassphraseWrap);
+  credsGrid.append(sqlUserField.wrap, sqlPasswordField.wrap, gpgPassphraseField.wrap);
 
   const actionRow = document.createElement("div");
   actionRow.className = "row";
@@ -563,11 +497,16 @@ export function createDeployPanel(): { el: HTMLElement; render: () => void } {
 
   function formFilled(): boolean {
     const tierChosen = tierInputs.some((i) => i.checked);
-    if (!tierChosen || !sshKeySelect.value || sqlUserInput.value.trim() === "" || sqlPasswordInput.value.trim() === "") {
+    if (
+      !tierChosen ||
+      !sshKeySelect.value ||
+      sqlUserField.input.value.trim() === "" ||
+      sqlPasswordField.input.value.trim() === ""
+    ) {
       return false;
     }
-    for (const input of extraEnvInputs.values()) {
-      if (input.value.trim() === "") return false;
+    for (const field of extraEnvFields.values()) {
+      if (field.input.value.trim() === "") return false;
     }
     return true;
   }

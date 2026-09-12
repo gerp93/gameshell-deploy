@@ -384,6 +384,28 @@ body {
   margin: 0;
 }
 
+.source-radio-group {
+  display: flex;
+  gap: 1rem;
+  margin: 0.3rem 0;
+  font-size: 0.82rem;
+  color: var(--text-muted);
+}
+
+/* The class above sets display:flex, which (author styles always beating
+   the UA stylesheet) would otherwise override the browser's default
+   [hidden] { display: none } and keep the radios visible. */
+.source-radio-group[hidden] {
+  display: none;
+}
+
+.source-radio-option {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  cursor: pointer;
+}
+
 [data-disabled="true"] {
   opacity: 0.5;
   pointer-events: none;
