@@ -582,3 +582,35 @@ button.secondary:hover:not(:disabled) {
   color: var(--text-muted);
   font-family: ui-monospace, "SF Mono", Consolas, monospace;
 }
+
+.secret-check-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin: 0.3rem 0 0.75rem;
+  font-size: 0.82rem;
+}
+
+.secret-check-row[hidden] {
+  display: none;
+}
+
+.secret-check-row button {
+  flex: none;
+  padding: 0.2rem 0.7rem;
+  font-size: 0.8rem;
+  white-space: nowrap;
+}
+
+.secret-check-result {
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+
+.secret-check-result.ok {
+  color: var(--ok);
+}
+
+.secret-check-result.fail {
+  color: var(--fail);
+}

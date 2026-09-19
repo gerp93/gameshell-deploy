@@ -91,6 +91,49 @@ func Load(path string) (DeployConf, error) {
 	return conf, scanner.Err()
 }
 
+// RawValue returns the value on the first KEY= line in path, whether or not
+// KEY is one of the recognized fields — used for per-secret keys like
+// SECRET_CHECK_YT_API_KEY that the form doesn't edit (Save leaves those lines
+// untouched, so they survive a GUI save).
+func RawValue(path, key string) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		k, v, ok := parseLine(scanner.Text())
+		if ok && k == key {
+			return v, nil
+		}
+	}
+	return "", scanner.Err()
+}
+
+// SecretCheckKey returns the deploy.conf key that holds the pre-deploy check
+// for the extra secret whose resolved env var name is resolvedName (e.g.
+// TRACK_TIMELINE_YT_API_KEY -> SECRET_CHECK_YT_API_KEY, named after the
+// EXTRA_ENV_VARS entry as written, without its '+'). ok is false when
+// resolvedName isn't one of conf's extra env vars.
+func SecretCheckKey(conf DeployConf, resolvedName string) (key string, ok bool) {
+	for _, tok := range extraEnvTokens(conf.ExtraEnvVars) {
+		name, concatPrefix, valid := parseExtraEnvToken(tok)
+		if !valid {
+			continue
+		}
+		resolved := name
+		if concatPrefix {
+			resolved = conf.EnvVarPrefix + "_" + name
+		}
+		if resolved == resolvedName {
+			return "SECRET_CHECK_" + name, true
+		}
+	}
+	return "", false
+}
+
 // CreateFromTemplate copies templatePath (deploy.conf.template) to destPath,
 // only if destPath doesn't already exist.
 func CreateFromTemplate(templatePath, destPath string) error {

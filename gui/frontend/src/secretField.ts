@@ -7,6 +7,8 @@
 //   - a hint line saying where the current value came from, or that the
 //     operator typed it themselves and it's about to be saved
 
+import type { SecretCheckResult } from "./api";
+
 let nextRadioGroupID = 0;
 
 export interface SecretField {
@@ -23,6 +25,13 @@ export interface SecretField {
   // secrets" checkbox state — call when that checkbox changes, for any
   // field the operator has already typed into.
   refreshTypedHint(remember: boolean): void;
+  // Adds a "Test key" button that runs check against the current value (the
+  // deploy.conf-configured request — see secretcheck.go). Pass null to remove
+  // it. Only fields whose key has a check configured should get one.
+  setChecker(check: ((value: string) => Promise<SecretCheckResult>) | null): void;
+  // Runs the check now, exactly as clicking the button does, and returns the
+  // result; null when there is no checker or the field is empty.
+  runCheck(): Promise<SecretCheckResult | null>;
 }
 
 export function createSecretField(
@@ -70,12 +79,77 @@ export function createSecretField(
   const hint = document.createElement("p");
   hint.className = "hint source-label";
 
+  const checkRow = document.createElement("div");
+  checkRow.className = "secret-check-row";
+  checkRow.hidden = true;
+  const checkButton = document.createElement("button");
+  checkButton.type = "button";
+  checkButton.className = "secondary";
+  checkButton.textContent = "Test key";
+  const checkResult = document.createElement("span");
+  checkResult.className = "secret-check-result";
+  checkRow.append(checkButton, checkResult);
+
+  let checker: ((value: string) => Promise<SecretCheckResult>) | null = null;
+  // Bumped whenever the value changes or a new check starts, so a slow check
+  // for an old value can't paint its verdict next to a newer one.
+  let checkToken = 0;
+
+  function clearCheckResult() {
+    checkToken++;
+    checkResult.textContent = "";
+    checkResult.className = "secret-check-result";
+  }
+
+  function showCheckResult(result: SecretCheckResult) {
+    const marks = { ok: "✓", invalid: "✗", unverified: "?", none: "" } as const;
+    checkResult.className = `secret-check-result ${result.status === "ok" ? "ok" : result.status === "invalid" ? "fail" : ""}`.trim();
+    checkResult.textContent = `${marks[result.status]} ${result.detail}`.trim();
+  }
+
+  async function runCheck(): Promise<SecretCheckResult | null> {
+    if (!checker || !input.value.trim()) return null;
+    const token = ++checkToken;
+    checkButton.disabled = true;
+    checkResult.className = "secret-check-result";
+    checkResult.textContent = "Testing…";
+    let result: SecretCheckResult;
+    try {
+      result = await checker(input.value);
+    } catch (err) {
+      result = {
+        status: "unverified",
+        detail: `Couldn't run the check: ${err instanceof Error ? err.message : String(err)}`,
+        host: "",
+      };
+    }
+    checkButton.disabled = false;
+    if (token === checkToken) showCheckResult(result);
+    return result;
+  }
+
+  checkButton.onclick = () => {
+    if (!input.value.trim()) {
+      checkResult.className = "secret-check-result";
+      checkResult.textContent = "Enter a key first.";
+      return;
+    }
+    void runCheck();
+  };
+
+  function setChecker(check: ((value: string) => Promise<SecretCheckResult>) | null) {
+    checker = check;
+    checkRow.hidden = check === null;
+    clearCheckResult();
+  }
+
   let lastEnvValue = "";
   let lastKeyringValue = "";
   let manuallyTyped = false;
 
   function selectSource(source: "env" | "keyring") {
     input.value = source === "env" ? lastEnvValue : lastKeyringValue;
+    clearCheckResult();
     hint.textContent =
       source === "env"
         ? "Pre-filled from an environment variable on this computer."
@@ -97,6 +171,7 @@ export function createSecretField(
 
   input.oninput = () => {
     manuallyTyped = true;
+    clearCheckResult();
     radioGroup.hidden = true;
     hint.textContent = input.value
       ? 'Typed here — will be saved to the OS keychain if "Remember secrets" is checked.'
@@ -117,6 +192,11 @@ export function createSecretField(
     } else if (envValue || keyringValue) {
       radioGroup.hidden = true;
       selectSource(envValue ? "env" : "keyring");
+      // Same value in both places: no choice to offer, but say so — otherwise
+      // the hint reads as if the keychain has nothing saved for this field.
+      if (envValue && keyringValue) {
+        hint.textContent = "Pre-filled — an environment variable and the OS keychain both hold this same value.";
+      }
       onSourceSelect?.();
     }
   }
@@ -128,6 +208,7 @@ export function createSecretField(
     manuallyTyped = false;
     radioGroup.hidden = true;
     hint.textContent = "";
+    clearCheckResult();
   }
 
   function refreshTypedHint(remember: boolean) {
@@ -139,6 +220,6 @@ export function createSecretField(
       : "";
   }
 
-  wrap.append(label, input, radioGroup, hint);
-  return { wrap, input, applyLoaded, reset, refreshTypedHint };
+  wrap.append(label, input, radioGroup, hint, checkRow);
+  return { wrap, input, applyLoaded, reset, refreshTypedHint, setChecker, runCheck };
 }

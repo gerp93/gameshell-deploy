@@ -70,6 +70,16 @@ encrypts database backups at rest.
   those values in the OS keyring (`gui/secrets`) when the operator checks
   "Remember secrets on this computer"; they still never land in
   `deploy.conf` or `settings.json`.
+- **Pre-deploy key checks** (GUI only, optional): a `SECRET_CHECK_<NAME>` line
+  in `deploy.conf` (named after the `EXTRA_ENV_VARS` entry without its `+`)
+  gives an `https://` URL plus `|`-separated headers with `{KEY}` where the
+  secret goes; `gui/secretcheck` GETs it before Deploy. Only a 400/401/403
+  blocks (Deploy again overrides); rate limits/5xx/network errors just warn.
+  The request comes from `deploy.conf` on disk, never from the frontend, and
+  the key is redacted from any text shown. `create.sh` ignores these lines.
+  Nothing else needs a check: the GPG passphrase already fails in `create.sh`
+  before any cloud resource exists, and the SQL user/password are chosen by
+  the operator, not validated by anything external.
 - **`GPG_PASSPHRASE`** (optional operator secret): backups are symmetric
   `gpg -c`/`gpg -d`, which normally prompts interactively via pinentry — fine
   for CLI use, but the GUI has no TTY for that. When set, `create.sh`/

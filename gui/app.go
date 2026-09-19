@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 
@@ -17,6 +18,7 @@ import (
 	"gameshell-deploy-gui/platform"
 	"gameshell-deploy-gui/preflight"
 	"gameshell-deploy-gui/scriptrunner"
+	"gameshell-deploy-gui/secretcheck"
 	"gameshell-deploy-gui/secrets"
 	"gameshell-deploy-gui/settings"
 )
@@ -309,6 +311,56 @@ func (a *App) SaveDeployConf(opsDir, appName string, conf deployconf.DeployConf)
 		return fmt.Errorf("invalid deploy.conf: %v", errs)
 	}
 	return deployconf.Save(filepath.Join(gameConfigDir(opsDir, appName), "deploy.conf"), conf)
+}
+
+// CheckExtraSecret tests one extra secret (by its resolved env var name)
+// against the SECRET_CHECK_* line in the game's deploy.conf, if any. The
+// deploy.conf lookup happens here rather than in the frontend so the request
+// the key is sent in comes from the file on disk, not from the caller. Status
+// "none" means no check is configured for this secret.
+func (a *App) CheckExtraSecret(opsDir, appName, envName, value string) (secretcheck.Result, error) {
+	spec, err := secretCheckSpec(opsDir, appName, envName)
+	if err != nil {
+		return secretcheck.Result{}, err
+	}
+	ctx, cancel := context.WithTimeout(a.ctx, 15*time.Second)
+	defer cancel()
+	return secretcheck.Check(ctx, secretcheck.NewClient(), spec, value), nil
+}
+
+// ConfiguredSecretChecks returns which of envNames (resolved extra env var
+// names) have a SECRET_CHECK_* line in the game's deploy.conf, so the UI only
+// offers to test keys that can actually be tested.
+func (a *App) ConfiguredSecretChecks(opsDir, appName string, envNames []string) ([]string, error) {
+	configured := []string{}
+	for _, name := range envNames {
+		spec, err := secretCheckSpec(opsDir, appName, name)
+		if err != nil {
+			return nil, err
+		}
+		if strings.TrimSpace(spec) != "" {
+			configured = append(configured, name)
+		}
+	}
+	return configured, nil
+}
+
+// secretCheckSpec reads the SECRET_CHECK_* value for one extra env var, or ""
+// when the game has no deploy.conf, doesn't list that var, or has no check.
+func secretCheckSpec(opsDir, appName, envName string) (string, error) {
+	path := filepath.Join(gameConfigDir(opsDir, appName), "deploy.conf")
+	if !deployconf.Exists(path) {
+		return "", nil
+	}
+	conf, err := deployconf.Load(path)
+	if err != nil {
+		return "", err
+	}
+	checkKey, ok := deployconf.SecretCheckKey(conf, envName)
+	if !ok {
+		return "", nil
+	}
+	return deployconf.RawValue(path, checkKey)
 }
 
 // --- preflight -------------------------------------------------------------

@@ -9,6 +9,8 @@ import {
   runCreate,
   saveSecrets,
   forgetSecrets,
+  checkExtraSecret,
+  configuredSecretChecks,
   setRememberSecrets,
   type ExtraEnvVar,
   type RegionOption,
@@ -123,6 +125,72 @@ export function createDeployPanel(): { el: HTMLElement; render: () => void } {
       extraEnvFields.set(name, field);
     }
     void fillSecrets();
+    void attachChecks(key, names);
+  }
+
+  // Offers "Test key" only for secrets whose deploy.conf has a SECRET_CHECK_*
+  // line. forKey stamps the lookup with the field set it was started for, so
+  // a slow answer can't attach buttons to another game's fields after a switch.
+  async function attachChecks(forKey: string, names: string[]) {
+    const { opsDir, appName } = state;
+    if (!opsDir || !appName || names.length === 0) return;
+    try {
+      const configured = (await configuredSecretChecks(opsDir, appName, names)) ?? [];
+      if (extraEnvFor !== forKey) return;
+      for (const name of configured) {
+        extraEnvFields.get(name)?.setChecker((value) => checkExtraSecret(opsDir, appName, name, value));
+      }
+    } catch {
+      // No checks is the safe fallback: the keys just stay untested.
+    }
+  }
+
+  // Fingerprints of key values the operator was told were rejected and chose
+  // to deploy with anyway (by clicking Deploy a second time). Hashed rather
+  // than stored so a rejected key doesn't linger in memory beside its field.
+  const acknowledgedBadKeys = new Set<string>();
+
+  async function fingerprint(name: string, value: string): Promise<string> {
+    const data = new TextEncoder().encode(`${name}\0${value}`);
+    const digest = await crypto.subtle.digest("SHA-256", data);
+    return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, "0")).join("");
+  }
+
+  const checkStatus = document.createElement("div");
+  checkStatus.className = "status-line";
+
+  // Tests every extra key that has a configured check, before anything is
+  // saved or created. Only a key the service actively rejects stops the
+  // deploy, and only once: the operator can click Deploy again to override
+  // (the check itself could be misconfigured). "Couldn't verify" never blocks.
+  async function keysOkToDeploy(): Promise<boolean> {
+    checkStatus.textContent = "";
+    const entries = [...extraEnvFields];
+    if (entries.length === 0) return true;
+    deployButton.disabled = true;
+    const results = await Promise.all(entries.map(([, field]) => field.runCheck()));
+
+    const rejected: [string, string][] = [];
+    const unverified: string[] = [];
+    for (const [i, [name, field]] of entries.entries()) {
+      const status = results[i]?.status;
+      if (status === "unverified") unverified.push(name);
+      if (status !== "invalid") continue;
+      const print = await fingerprint(name, field.input.value);
+      if (!acknowledgedBadKeys.has(print)) rejected.push([name, print]);
+    }
+
+    if (rejected.length > 0) {
+      for (const [, print] of rejected) acknowledgedBadKeys.add(print);
+      checkStatus.textContent = `Deploy not started — ${rejected.map(([n]) => n).join(", ")} was rejected (see above). Fix the key, or click Deploy again to deploy with it anyway.`;
+      void render();
+      return false;
+    }
+    acknowledgedBadKeys.clear();
+    if (unverified.length > 0) {
+      checkStatus.textContent = `Couldn't verify ${unverified.join(", ")} (see above) — deploying anyway.`;
+    }
+    return true;
   }
 
   async function fillSecrets() {
@@ -258,6 +326,8 @@ export function createDeployPanel(): { el: HTMLElement; render: () => void } {
       extraEnv.push({ key: name, value: field.input.value });
     }
 
+    if (!(await keysOkToDeploy())) return;
+
     if (rememberCheck.checked) {
       try {
         await saveSecrets({
@@ -340,7 +410,7 @@ export function createDeployPanel(): { el: HTMLElement; render: () => void } {
   // Everything the operator fills in — hidden while a run is in flight, so
   // switching back to a deploying game shows its progress rather than an
   // inert form implying it hasn't started.
-  const formParts = [sshKeyWrap, regionWrap, tierWrap, credsGrid, extraEnvWrap, rememberWrap, backupWarning, actionRow];
+  const formParts = [sshKeyWrap, regionWrap, tierWrap, credsGrid, extraEnvWrap, rememberWrap, backupWarning, checkStatus, actionRow];
 
   el.append(
     sshKeyWrap,
@@ -350,6 +420,7 @@ export function createDeployPanel(): { el: HTMLElement; render: () => void } {
     extraEnvWrap,
     rememberWrap,
     backupWarning,
+    checkStatus,
     actionRow,
     startNewRow,
     runSummary.el,

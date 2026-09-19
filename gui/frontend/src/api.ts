@@ -96,6 +96,15 @@ export interface ExtraEnvVar {
   value: string;
 }
 
+// Result of testing an extra API key against its SECRET_CHECK_* line in
+// deploy.conf. Only "invalid" should stop a deploy — "unverified" means the
+// service couldn't answer clearly (network, rate limit), not that the key is bad.
+export interface SecretCheckResult {
+  status: "ok" | "invalid" | "unverified" | "none";
+  detail: string;
+  host: string;
+}
+
 export interface CreateRequest {
   opsDir: string;
   appName: string;
@@ -126,7 +135,15 @@ export const loadSecrets = (extraNames: string[]): Promise<LoadedSecrets> =>
 export const saveSecrets = (bundle: SecretsBundle): Promise<void> =>
   Backend.SaveSecrets(bundle as never);
 export const forgetSecrets = (extraNames: string[]): Promise<void> => Backend.ForgetSecrets(extraNames);
-export const getOpsDir = (): Promise<string> => Backend.GetOpsDir();
+export const checkExtraSecret = (
+  opsDir: string,
+  appName: string,
+  envName: string,
+  value: string,
+): Promise<SecretCheckResult> => Backend.CheckExtraSecret(opsDir, appName, envName, value) as Promise<SecretCheckResult>;
+export const configuredSecretChecks = (opsDir: string, appName: string, envNames: string[]): Promise<string[]> =>
+  Backend.ConfiguredSecretChecks(opsDir, appName, envNames);
+export const getOpsDir =(): Promise<string> => Backend.GetOpsDir();
 export const openOpsDir = (opsDir: string): Promise<void> => Backend.OpenOpsDir(opsDir);
 export const listGames = (opsDir: string): Promise<string[]> => Backend.ListGames(opsDir);
 export const selectApp = (appName: string): Promise<void> => Backend.SelectApp(appName);
