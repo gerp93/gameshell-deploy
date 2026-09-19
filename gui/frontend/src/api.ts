@@ -26,6 +26,13 @@ export interface LoadedSecrets {
   keyring: SecretsBundle;
 }
 
+// A pre-deploy key check saved as SECRET_CHECK_<name> in deploy.conf. name is
+// the EXTRA_ENV_VARS entry without its '+'; spec is "URL|Header: value|...".
+export interface SecretCheckEntry {
+  name: string;
+  spec: string;
+}
+
 export interface DeployConf {
   appName: string;
   envVarPrefix: string;
@@ -38,6 +45,7 @@ export interface DeployConf {
   dropletImage: string;
   dropletSize: string;
   extraEnvVars: string;
+  secretChecks: SecretCheckEntry[];
 }
 
 export interface DeployConfResult {
@@ -141,7 +149,11 @@ export const checkExtraSecret = (
   envName: string,
   value: string,
 ): Promise<SecretCheckResult> => Backend.CheckExtraSecret(opsDir, appName, envName, value) as Promise<SecretCheckResult>;
-export const configuredSecretChecks = (opsDir: string, appName: string, envNames: string[]): Promise<string[]> =>
+// Tests a check spec that may not be saved yet (the Config tab's editor).
+export const testSecretCheck = (spec: string, value: string): Promise<SecretCheckResult> =>
+  Backend.TestSecretCheck(spec, value) as Promise<SecretCheckResult>;
+export const getVersion = (): Promise<string> => Backend.GetVersion();
+export const configuredSecretChecks =(opsDir: string, appName: string, envNames: string[]): Promise<string[]> =>
   Backend.ConfiguredSecretChecks(opsDir, appName, envNames);
 export const getOpsDir =(): Promise<string> => Backend.GetOpsDir();
 export const openOpsDir = (opsDir: string): Promise<void> => Backend.OpenOpsDir(opsDir);
@@ -157,9 +169,9 @@ export const renameGame = (opsDir: string, oldName: string, newName: string): Pr
 export const loadDeployConf = (opsDir: string, appName: string): Promise<DeployConfResult> =>
   Backend.LoadDeployConf(opsDir, appName);
 export const createDeployConf = (opsDir: string, appName: string, conf: DeployConf): Promise<void> =>
-  Backend.CreateDeployConf(opsDir, appName, conf);
+  Backend.CreateDeployConf(opsDir, appName, conf as never);
 export const saveDeployConf = (opsDir: string, appName: string, conf: DeployConf): Promise<void> =>
-  Backend.SaveDeployConf(opsDir, appName, conf);
+  Backend.SaveDeployConf(opsDir, appName, conf as never);
 
 export const runPreflightChecks = (): Promise<PreflightResult> => Backend.RunPreflightChecks();
 export const listSSHKeys = (opsDir: string): Promise<string[]> => Backend.ListSSHKeys(opsDir);

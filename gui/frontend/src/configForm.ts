@@ -1,5 +1,15 @@
-import { createDeployConf, loadDeployConf, saveDeployConf, type DeployConf } from "./api";
+import {
+  createDeployConf,
+  loadDeployConf,
+  loadSecrets,
+  saveDeployConf,
+  testSecretCheck,
+  type DeployConf,
+  type SecretCheckEntry,
+} from "./api";
 import { parseExtraEnvVars, serializeExtraEnvVars, resolveExtraEnvName, type ExtraEnvEntry } from "./extraEnv";
+import { createSecretField } from "./secretField";
+import { joinSpec, specHost, splitSpec } from "./secretCheckSpec";
 import { refreshGames } from "./appPanel";
 import { state, notify, isGameRunning } from "./state";
 
@@ -24,9 +34,14 @@ const emptyConf: DeployConf = {
   dropletImage: "",
   dropletSize: "",
   extraEnvVars: "",
+  secretChecks: [],
 };
 
-const fieldDefs: Array<{ key: keyof DeployConf; label: string; required: boolean }> = [
+// The DeployConf fields edited as plain text inputs (everything but the
+// secretChecks list, which lives in the extra-env rows).
+type TextFieldKey = Exclude<keyof DeployConf, "secretChecks">;
+
+const fieldDefs: Array<{ key: TextFieldKey; label: string; required: boolean }> = [
   { key: "appName", label: "APP_NAME", required: true },
   { key: "envVarPrefix", label: "ENV_VAR_PREFIX", required: true },
   { key: "dbName", label: "DB_NAME", required: true },
@@ -69,7 +84,7 @@ export function createConfigForm(): { el: HTMLElement; render: () => void } {
   const grid = document.createElement("div");
   grid.className = "field-grid";
   form.appendChild(grid);
-  const inputs: Partial<Record<keyof DeployConf, HTMLInputElement>> = {};
+  const inputs: Partial<Record<TextFieldKey, HTMLInputElement>> = {};
 
   for (const def of fieldDefs) {
     const wrapper = document.createElement("div");
@@ -100,7 +115,7 @@ export function createConfigForm(): { el: HTMLElement; render: () => void } {
   const extraEnvHint = document.createElement("p");
   extraEnvHint.className = "hint";
   extraEnvHint.textContent =
-    "One name per row. Check concat with prefix to prepend ENV_VAR_PREFIX (e.g. YT_API_KEY → TRACK_TIMELINE_YT_API_KEY).";
+    "One name per row. Check concat with prefix to prepend ENV_VAR_PREFIX (e.g. YT_API_KEY → TRACK_TIMELINE_YT_API_KEY). Each row can also have a key check: the GUI tests the key against its service before deploying.";
   const extraEnvList = document.createElement("div");
   extraEnvList.className = "extra-env-list";
   const extraEnvAdd = document.createElement("button");
@@ -111,10 +126,15 @@ export function createConfigForm(): { el: HTMLElement; render: () => void } {
   form.appendChild(extraEnvSection);
 
   type ExtraEnvRow = {
+    // Holds the name row and the key-check editor beneath it; this is what
+    // gets removed, while `wrap` is just the flex row of name/checkbox/Remove.
+    item: HTMLElement;
     wrap: HTMLElement;
     nameInput: HTMLInputElement;
     prefixCheck: HTMLInputElement;
     resolved: HTMLElement;
+    checkUrl: HTMLInputElement;
+    checkHeaders: HTMLTextAreaElement;
   };
   const extraEnvRows: ExtraEnvRow[] = [];
 
@@ -130,7 +150,9 @@ export function createConfigForm(): { el: HTMLElement; render: () => void } {
     row.resolved.textContent = resolved && row.prefixCheck.checked ? `→ ${resolved}` : "";
   }
 
-  function addExtraEnvRow(entry?: ExtraEnvEntry) {
+  function addExtraEnvRow(entry?: ExtraEnvEntry, spec = "") {
+    const item = document.createElement("div");
+    item.className = "extra-env-item";
     const wrap = document.createElement("div");
     wrap.className = "extra-env-row";
 
@@ -157,19 +179,103 @@ export function createConfigForm(): { el: HTMLElement; render: () => void } {
     remove.className = "secondary";
     remove.textContent = "Remove";
 
-    const row: ExtraEnvRow = { wrap, nameInput, prefixCheck, resolved };
+    // --- key check editor -------------------------------------------------
+    // Stored as SECRET_CHECK_<name> (see secretCheckSpec.ts). Open by default
+    // only when one is already set, so an unconfigured row stays compact.
+    const parts = splitSpec(spec);
+    const details = document.createElement("details");
+    details.className = "secret-check-config";
+    details.open = parts.url !== "";
+    const summary = document.createElement("summary");
+
+    const urlField = document.createElement("div");
+    urlField.className = "field";
+    const urlLabel = document.createElement("label");
+    urlLabel.textContent = "Check URL (GET, https only)";
+    const checkUrl = document.createElement("input");
+    checkUrl.type = "text";
+    checkUrl.autocomplete = "off";
+    checkUrl.placeholder = "https://api.example.com/v1/models?key={KEY}";
+    checkUrl.value = parts.url;
+    urlField.append(urlLabel, checkUrl);
+
+    const headersField = document.createElement("div");
+    headersField.className = "field";
+    const headersLabel = document.createElement("label");
+    headersLabel.textContent = "Headers (optional, one per line)";
+    const checkHeaders = document.createElement("textarea");
+    checkHeaders.rows = 2;
+    checkHeaders.spellcheck = false;
+    checkHeaders.placeholder = "x-api-key: {KEY}";
+    checkHeaders.value = parts.headers;
+    headersField.append(headersLabel, checkHeaders);
+
+    const checkHint = document.createElement("p");
+    checkHint.className = "hint";
+    checkHint.textContent =
+      "Put {KEY} where the key goes (in the URL and/or a header). Pick a free, read-only endpoint. A 400/401/403 blocks the deploy; rate limits and network errors only warn. The key is sent to whatever host you enter here.";
+
+    // Tests the unsaved values above, so a check can be tried before saving.
+    // Pre-filled from the environment / OS keychain like the Deploy tab's
+    // field, but only once the editor is opened, so the keychain isn't read
+    // for every game just by viewing its Config tab.
+    const testField = createSecretField("Key to test with", "password", () => {});
+    testField.setChecker(async (value) => {
+      const current = joinSpec(checkUrl.value, checkHeaders.value);
+      if (!current) return { status: "unverified", detail: "Enter a check URL first.", host: "" };
+      return testSecretCheck(current, value);
+    });
+
+    let prefilledFor = "";
+    async function prefill() {
+      const name = resolveExtraEnvName({ name: nameInput.value, concatPrefix: prefixCheck.checked }, prefixValue());
+      if (!name || name === prefilledFor) return;
+      prefilledFor = name;
+      try {
+        const { env, keyring } = await loadSecrets([name]);
+        testField.applyLoaded(
+          env.extraEnv?.find((e) => e.key === name)?.value ?? "",
+          keyring.extraEnv?.find((e) => e.key === name)?.value ?? "",
+        );
+      } catch {
+        prefilledFor = "";
+      }
+    }
+    details.ontoggle = () => {
+      if (details.open) void prefill();
+    };
+
+    function refreshSummary() {
+      const host = specHost(joinSpec(checkUrl.value, checkHeaders.value));
+      summary.textContent = checkUrl.value.trim()
+        ? `Key check${host ? ` — sends the key to ${host}` : ""}`
+        : "Key check (optional) — not set";
+    }
+    const onSpecEdit = () => {
+      testField.clearCheck();
+      refreshSummary();
+    };
+    checkUrl.oninput = onSpecEdit;
+    checkHeaders.oninput = onSpecEdit;
+    refreshSummary();
+
+    details.append(summary, urlField, headersField, checkHint, testField.wrap);
+
+    const row: ExtraEnvRow = { item, wrap, nameInput, prefixCheck, resolved, checkUrl, checkHeaders };
     nameInput.oninput = () => updateRowResolved(row);
     prefixCheck.onchange = () => updateRowResolved(row);
     remove.onclick = () => {
-      wrap.remove();
+      item.remove();
       const idx = extraEnvRows.indexOf(row);
       if (idx >= 0) extraEnvRows.splice(idx, 1);
     };
 
     wrap.append(nameInput, checkLabel, resolved, remove);
-    extraEnvList.appendChild(wrap);
+    item.append(wrap, details);
+    extraEnvList.appendChild(item);
     extraEnvRows.push(row);
     updateRowResolved(row);
+    if (details.open) void prefill();
   }
 
   extraEnvAdd.onclick = () => addExtraEnvRow();
@@ -183,11 +289,23 @@ export function createConfigForm(): { el: HTMLElement; render: () => void } {
     );
   }
 
-  function fillExtraEnvRows(raw: string) {
+  // One SECRET_CHECK_<name> per row that has a URL. A row without a URL saves
+  // no check, which also removes any existing line for it (see deployconf.Save).
+  function secretChecksFromRows(): SecretCheckEntry[] {
+    const checks: SecretCheckEntry[] = [];
+    for (const r of extraEnvRows) {
+      const name = r.nameInput.value.trim();
+      const spec = joinSpec(r.checkUrl.value, r.checkHeaders.value);
+      if (name && spec) checks.push({ name, spec });
+    }
+    return checks;
+  }
+
+  function fillExtraEnvRows(raw: string, checks: SecretCheckEntry[]) {
     extraEnvList.innerHTML = "";
     extraEnvRows.length = 0;
     for (const entry of parseExtraEnvVars(raw)) {
-      addExtraEnvRow(entry);
+      addExtraEnvRow(entry, checks.find((c) => c.name === entry.name)?.spec ?? "");
     }
   }
 
@@ -207,6 +325,7 @@ export function createConfigForm(): { el: HTMLElement; render: () => void } {
       conf[def.key] = inputs[def.key]!.value;
     }
     conf.extraEnvVars = extraEnvFromRows();
+    conf.secretChecks = secretChecksFromRows();
     return conf;
   }
 
@@ -214,7 +333,7 @@ export function createConfigForm(): { el: HTMLElement; render: () => void } {
     for (const def of fieldDefs) {
       inputs[def.key]!.value = conf[def.key] ?? "";
     }
-    fillExtraEnvRows(conf.extraEnvVars ?? "");
+    fillExtraEnvRows(conf.extraEnvVars ?? "", conf.secretChecks ?? []);
   }
 
   cloneButton.onclick = async () => {

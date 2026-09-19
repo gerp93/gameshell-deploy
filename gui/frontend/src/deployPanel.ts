@@ -103,6 +103,10 @@ export function createDeployPanel(): { el: HTMLElement; render: () => void } {
   extraEnvWrap.style.display = "none";
   const extraEnvFields = new Map<string, SecretField>();
   let extraEnvFor = "";
+  // What the fields' "Test key" buttons were last attached for. Checks are
+  // editable in the Config tab, so saving there must update these without
+  // rebuilding the fields (which would wipe a key the operator just typed).
+  let extraEnvChecksFor = "";
 
   function extraEnvNames(): string[] {
     return resolveExtraEnvNames(
@@ -114,8 +118,16 @@ export function createDeployPanel(): { el: HTMLElement; render: () => void } {
   function rebuildExtraEnvFields() {
     const names = extraEnvNames();
     const key = `${state.appName}\0${names.join(" ")}`;
-    if (key === extraEnvFor) return;
+    const checksKey = JSON.stringify(state.deployConf?.secretChecks ?? []);
+    if (key === extraEnvFor) {
+      if (checksKey !== extraEnvChecksFor) {
+        extraEnvChecksFor = checksKey;
+        void attachChecks(key, names);
+      }
+      return;
+    }
     extraEnvFor = key;
+    extraEnvChecksFor = checksKey;
     extraEnvWrap.innerHTML = "";
     extraEnvFields.clear();
     extraEnvWrap.style.display = names.length ? "" : "none";
@@ -135,13 +147,17 @@ export function createDeployPanel(): { el: HTMLElement; render: () => void } {
     const { opsDir, appName } = state;
     if (!opsDir || !appName || names.length === 0) return;
     try {
-      const configured = (await configuredSecretChecks(opsDir, appName, names)) ?? [];
+      const configured = new Set((await configuredSecretChecks(opsDir, appName, names)) ?? []);
       if (extraEnvFor !== forKey) return;
-      for (const name of configured) {
-        extraEnvFields.get(name)?.setChecker((value) => checkExtraSecret(opsDir, appName, name, value));
+      for (const [name, field] of extraEnvFields) {
+        field.setChecker(configured.has(name) ? (value) => checkExtraSecret(opsDir, appName, name, value) : null);
       }
-    } catch {
-      // No checks is the safe fallback: the keys just stay untested.
+    } catch (err) {
+      // Untested keys are still deployable, but say so — silently showing no
+      // buttons is indistinguishable from "no checks configured".
+      if (extraEnvFor === forKey) {
+        checkStatus.textContent = `Couldn't load key checks: ${err instanceof Error ? err.message : String(err)}`;
+      }
     }
   }
 
@@ -182,7 +198,8 @@ export function createDeployPanel(): { el: HTMLElement; render: () => void } {
 
     if (rejected.length > 0) {
       for (const [, print] of rejected) acknowledgedBadKeys.add(print);
-      checkStatus.textContent = `Deploy not started — ${rejected.map(([n]) => n).join(", ")} was rejected (see above). Fix the key, or click Deploy again to deploy with it anyway.`;
+      const many = rejected.length > 1;
+      checkStatus.textContent = `Deploy not started — ${rejected.map(([n]) => n).join(", ")} ${many ? "were" : "was"} rejected (see above). Fix the key${many ? "s" : ""}, or click Deploy again to deploy anyway.`;
       void render();
       return false;
     }

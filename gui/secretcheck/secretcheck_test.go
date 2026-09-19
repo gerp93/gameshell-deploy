@@ -97,6 +97,22 @@ func TestBadConfigIsUnverified(t *testing.T) {
 	}
 }
 
+func TestErrorSummaryPullsTheHumanMessage(t *testing.T) {
+	cases := map[string]struct{ body, want string }{
+		"anthropic": {`{"type":"error","error":{"type":"authentication_error","message":"invalid x-api-key"},"request_id":"r"}`, "invalid x-api-key"},
+		"google":    {`{"error":{"code":400,"message":"API key not valid. Please pass a valid API key."}}`, "API key not valid. Please pass a valid API key."},
+		"string":    {`{"error":"bad token"}`, "bad token"},
+		"message":   {`{"message":"Unauthorized"}`, "Unauthorized"},
+		"not json":  {"  plain   text\n body ", "plain text body"},
+		"no fields": {`{"code":7}`, `{"code":7}`},
+	}
+	for name, tc := range cases {
+		if got := errorSummary([]byte(tc.body)); got != tc.want {
+			t.Fatalf("%s: got %q, want %q", name, got, tc.want)
+		}
+	}
+}
+
 func TestEmptySpecIsNone(t *testing.T) {
 	if res := Check(context.Background(), NewClient(), "  ", testKey); res.Status != None {
 		t.Fatalf("status = %s, want none", res.Status)

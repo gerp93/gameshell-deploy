@@ -2,8 +2,15 @@ package deployconf
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
+)
+
+const (
+	ytSpec        = "https://www.googleapis.com/youtube/v3/videos?part=id&id=abc&key={KEY}"
+	anthropicSpec = "https://api.anthropic.com/v1/models|x-api-key: {KEY}|anthropic-version: 2023-06-01"
 )
 
 func TestSecretCheckKeyResolvesPrefixedAndPlainNames(t *testing.T) {
@@ -24,27 +31,114 @@ func TestSecretCheckKeyResolvesPrefixedAndPlainNames(t *testing.T) {
 	}
 }
 
-func TestRawValueAndSavePreservesCheckLines(t *testing.T) {
+func writeConf(t *testing.T, body string) string {
+	t.Helper()
 	path := filepath.Join(t.TempDir(), "deploy.conf")
-	body := "APP_NAME=g\nSECRET_CHECK_YT_API_KEY=\"https://h/?key={KEY}|X-A: {KEY}\"\n"
 	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	return path
+}
 
-	got, err := RawValue(path, "SECRET_CHECK_YT_API_KEY")
-	if err != nil || got != "https://h/?key={KEY}|X-A: {KEY}" {
-		t.Fatalf("RawValue = %q, %v", got, err)
-	}
+func TestLoadReadsSecretChecks(t *testing.T) {
+	path := writeConf(t, "APP_NAME=g\nEXTRA_ENV_VARS=\"+YT_API_KEY +ANTHROPIC_API_KEY\"\n"+
+		"SECRET_CHECK_YT_API_KEY=\""+ytSpec+"\"\n"+
+		"SECRET_CHECK_ANTHROPIC_API_KEY=\""+anthropicSpec+"\"\n")
 
 	conf, err := Load(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	conf.AppName = "renamed"
+	want := []SecretCheck{{"YT_API_KEY", ytSpec}, {"ANTHROPIC_API_KEY", anthropicSpec}}
+	if len(conf.SecretChecks) != 2 || conf.SecretChecks[0] != want[0] || conf.SecretChecks[1] != want[1] {
+		t.Fatalf("SecretChecks = %+v, want %+v", conf.SecretChecks, want)
+	}
+	if got, _ := RawValue(path, "SECRET_CHECK_YT_API_KEY"); got != ytSpec {
+		t.Fatalf("RawValue = %q", got)
+	}
+}
+
+func TestSaveWritesRewritesAndRemovesChecks(t *testing.T) {
+	path := writeConf(t, "# keep me\nAPP_NAME=g\nEXTRA_ENV_VARS=\"+YT_API_KEY +ANTHROPIC_API_KEY\"\n"+
+		"SECRET_CHECK_YT_API_KEY=\"https://old.example/?key={KEY}\"\n"+
+		"SECRET_CHECK_GONE=\"https://gone.example/?key={KEY}\"\n")
+
+	conf, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// YT rewritten, ANTHROPIC newly added, GONE (no longer in the form) dropped.
+	conf.SecretChecks = []SecretCheck{{"YT_API_KEY", ytSpec}, {"ANTHROPIC_API_KEY", anthropicSpec}}
 	if err := Save(path, conf); err != nil {
 		t.Fatal(err)
 	}
-	if got, _ := RawValue(path, "SECRET_CHECK_YT_API_KEY"); got != "https://h/?key={KEY}|X-A: {KEY}" {
-		t.Fatalf("GUI save clobbered the check line: %q", got)
+
+	got, _ := Load(path)
+	if len(got.SecretChecks) != 2 || got.SecretChecks[0].Spec != ytSpec || got.SecretChecks[1].Spec != anthropicSpec {
+		t.Fatalf("after save: %+v", got.SecretChecks)
+	}
+	raw, _ := os.ReadFile(path)
+	if !strings.Contains(string(raw), "# keep me") || strings.Contains(string(raw), "GONE") || strings.Contains(string(raw), "old.example") {
+		t.Fatalf("unexpected file contents:\n%s", raw)
+	}
+
+	// Clearing a spec removes its line.
+	got.SecretChecks[0].Spec = "  "
+	if err := Save(path, got); err != nil {
+		t.Fatal(err)
+	}
+	after, _ := Load(path)
+	if len(after.SecretChecks) != 1 || after.SecretChecks[0].Name != "ANTHROPIC_API_KEY" {
+		t.Fatalf("after clearing YT: %+v", after.SecretChecks)
+	}
+}
+
+// create.sh sources deploy.conf, so a saved spec containing & and | must come
+// back through bash intact rather than backgrounding a command.
+func TestSavedChecksSurviveSourcingInBash(t *testing.T) {
+	bash, err := exec.LookPath("bash")
+	if err != nil {
+		t.Skip("bash not available")
+	}
+	path := writeConf(t, "APP_NAME=g\nEXTRA_ENV_VARS=\"+YT_API_KEY +ANTHROPIC_API_KEY\"\n")
+	conf, _ := Load(path)
+	conf.SecretChecks = []SecretCheck{{"YT_API_KEY", ytSpec}, {"ANTHROPIC_API_KEY", anthropicSpec}}
+	if err := Save(path, conf); err != nil {
+		t.Fatal(err)
+	}
+
+	script := "set -e; source \"$1\"; printf '%s\\n%s' \"$SECRET_CHECK_YT_API_KEY\" \"$SECRET_CHECK_ANTHROPIC_API_KEY\""
+	out, err := exec.Command(bash, "-c", script, "bash", filepath.ToSlash(path)).CombinedOutput()
+	if err != nil {
+		t.Fatalf("bash failed: %v\n%s", err, out)
+	}
+	if string(out) != ytSpec+"\n"+anthropicSpec {
+		t.Fatalf("bash saw:\n%s", out)
+	}
+}
+
+func TestValidateChecksRejectsOrphansAndBadSpecs(t *testing.T) {
+	base := DeployConf{
+		AppName: "g", EnvVarPrefix: "G", DBName: "G", HTTPPort: "1", GitRepo: "o/n",
+		ExtraEnvVars: "+YT_API_KEY",
+	}
+
+	ok := base
+	ok.SecretChecks = []SecretCheck{{"YT_API_KEY", ytSpec}, {"YT_API_KEY", ""}}
+	if errs := Validate(ok); len(errs) != 0 {
+		t.Fatalf("valid conf rejected: %v", errs)
+	}
+
+	for name, sc := range map[string]SecretCheck{
+		"orphan":   {"NOT_LISTED", ytSpec},
+		"http":     {"YT_API_KEY", "http://example.com/?key={KEY}"},
+		"no key":   {"YT_API_KEY", "https://example.com/?key=abc"},
+		"bad head": {"YT_API_KEY", "https://example.com/{KEY}|nocolon"},
+	} {
+		bad := base
+		bad.SecretChecks = []SecretCheck{sc}
+		if errs := Validate(bad); len(errs) == 0 {
+			t.Fatalf("%s: expected a validation error", name)
+		}
 	}
 }

@@ -11,7 +11,23 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+
+	"gameshell-deploy-gui/secretcheck"
 )
+
+// secretCheckPrefix starts the deploy.conf key of a pre-deploy key check:
+// SECRET_CHECK_<NAME>, where NAME is the EXTRA_ENV_VARS entry without its '+'.
+// See package secretcheck for the value format.
+const secretCheckPrefix = "SECRET_CHECK_"
+
+// SecretCheck is one pre-deploy key check. A slice on DeployConf rather than a
+// map because Wails' generated TS models omit map fields.
+type SecretCheck struct {
+	// Name is the EXTRA_ENV_VARS entry without its '+' (e.g. YT_API_KEY).
+	Name string `json:"name"`
+	// Spec is the SECRET_CHECK_<Name> value: "URL|Header: value|...".
+	Spec string `json:"spec"`
+}
 
 // DeployConf mirrors the keys documented in deploy.conf.template.
 type DeployConf struct {
@@ -31,6 +47,9 @@ type DeployConf struct {
 	// prefix TRACK_TIMELINE becomes TRACK_TIMELINE_YT_API_KEY). Commas are
 	// treated as separators, same as spaces.
 	ExtraEnvVars string `json:"extraEnvVars"`
+	// SecretChecks are the SECRET_CHECK_<NAME> lines, one per extra env var
+	// that has a pre-deploy check. Saved back as those same lines.
+	SecretChecks []SecretCheck `json:"secretChecks"`
 }
 
 type field struct {
@@ -86,6 +105,8 @@ func Load(path string) (DeployConf, error) {
 		}
 		if fl := fieldByKey(key); fl != nil {
 			*fl.get(&conf) = value
+		} else if name, isCheck := checkName(key); isCheck {
+			conf.SecretChecks = append(conf.SecretChecks, SecretCheck{Name: name, Spec: value})
 		}
 	}
 	return conf, scanner.Err()
@@ -161,6 +182,13 @@ func Save(path string, conf DeployConf) error {
 		return err
 	}
 
+	wantChecks := map[string]string{}
+	for _, sc := range conf.SecretChecks {
+		if strings.TrimSpace(sc.Spec) != "" {
+			wantChecks[sc.Name] = strings.TrimSpace(sc.Spec)
+		}
+	}
+
 	var out []string
 	seen := map[string]bool{}
 	scanner := bufio.NewScanner(f)
@@ -170,6 +198,15 @@ func Save(path string, conf DeployConf) error {
 		if ok {
 			if fl := fieldByKey(key); fl != nil {
 				line = key + "=" + writeValue(*fl.get(&conf))
+				seen[key] = true
+			} else if name, isCheck := checkName(key); isCheck {
+				// The form owns every SECRET_CHECK_ line: rewrite the ones it
+				// still has, and drop the ones it cleared or removed.
+				spec, wanted := wantChecks[name]
+				if !wanted || seen[key] {
+					continue
+				}
+				line = key + "=" + writeValue(spec)
 				seen[key] = true
 			}
 		}
@@ -189,8 +226,21 @@ func Save(path string, conf DeployConf) error {
 			out = append(out, fl.key+"="+writeValue(v))
 		}
 	}
+	for _, sc := range conf.SecretChecks {
+		key := secretCheckPrefix + sc.Name
+		if spec, wanted := wantChecks[sc.Name]; wanted && !seen[key] {
+			out = append(out, key+"="+writeValue(spec))
+			seen[key] = true
+		}
+	}
 
 	return os.WriteFile(path, []byte(strings.Join(out, "\n")+"\n"), 0o644)
+}
+
+// checkName returns NAME for a SECRET_CHECK_<NAME> key.
+func checkName(key string) (string, bool) {
+	name := strings.TrimPrefix(key, secretCheckPrefix)
+	return name, name != key && name != ""
 }
 
 // parseLine extracts KEY and VALUE from a "KEY=VALUE" line. Comment and
@@ -209,9 +259,11 @@ func parseLine(line string) (key, value string, ok bool) {
 
 // writeValue quotes a deploy.conf value when `source` would otherwise split
 // it. Unquoted EXTRA_ENV_VARS=+A +B is parsed as EXTRA_ENV_VARS=+A and then
-// a command named +B ("command not found").
+// a command named +B ("command not found"). Shell operators (& | ; < > ( ))
+// count too: a SECRET_CHECK URL with "&id=..." left unquoted would background
+// a command and drop the rest of the value.
 func writeValue(v string) string {
-	if v == "" || !strings.ContainsAny(v, " \t#'\"$`\\") {
+	if v == "" || !strings.ContainsAny(v, " \t#'\"$`\\&|;<>()") {
 		return v
 	}
 	escaped := strings.ReplaceAll(v, `\`, `\\`)
@@ -274,6 +326,32 @@ func Validate(conf DeployConf) []string {
 			if !envVarNamePattern.MatchString(resolved) {
 				errs = append(errs, "EXTRA_ENV_VARS concatenates to an invalid name: "+resolved)
 			}
+		}
+	}
+	errs = append(errs, validateSecretChecks(conf)...)
+	return errs
+}
+
+// validateSecretChecks makes sure each check belongs to a listed extra env
+// var (an orphan line would silently never run) and is a usable spec.
+func validateSecretChecks(conf DeployConf) []string {
+	var errs []string
+	listed := map[string]bool{}
+	for _, tok := range extraEnvTokens(conf.ExtraEnvVars) {
+		if name, _, ok := parseExtraEnvToken(tok); ok {
+			listed[name] = true
+		}
+	}
+	for _, sc := range conf.SecretChecks {
+		if strings.TrimSpace(sc.Spec) == "" {
+			continue
+		}
+		if !envVarNamePattern.MatchString(sc.Name) || !listed[sc.Name] {
+			errs = append(errs, "key check for "+sc.Name+" doesn't match any EXTRA_ENV_VARS entry")
+			continue
+		}
+		if err := secretcheck.ValidateSpec(sc.Spec); err != nil {
+			errs = append(errs, "key check for "+sc.Name+": "+err.Error())
 		}
 	}
 	return errs

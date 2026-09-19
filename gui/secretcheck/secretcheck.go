@@ -14,6 +14,7 @@ package secretcheck
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -58,6 +59,37 @@ func NewClient() *http.Client {
 	}
 }
 
+// ValidateSpec reports whether spec is a usable check: an https:// URL, at
+// least one {KEY} placeholder somewhere, and well-formed "Name: value"
+// headers. An empty spec is valid (no check). Shared by Check and by the
+// deploy.conf save path so a check that can never run is rejected on save.
+func ValidateSpec(spec string) error {
+	spec = strings.TrimSpace(spec)
+	if spec == "" {
+		return nil
+	}
+	parts := strings.Split(spec, "|")
+	u, err := url.Parse(strings.ReplaceAll(strings.TrimSpace(parts[0]), placeholder, "KEY"))
+	if err != nil || u.Scheme != "https" || u.Host == "" {
+		return errors.New("the check URL must be a valid https:// URL")
+	}
+	if !strings.Contains(spec, placeholder) {
+		return errors.New("the check never uses " + placeholder + ", so it can't test a key")
+	}
+	for _, h := range parts[1:] {
+		if _, _, ok := parseHeader(h); !ok {
+			return fmt.Errorf("malformed header %q (expected \"Name: value\")", strings.TrimSpace(h))
+		}
+	}
+	return nil
+}
+
+func parseHeader(h string) (name, value string, ok bool) {
+	name, value, ok = strings.Cut(h, ":")
+	name = strings.TrimSpace(name)
+	return name, strings.TrimSpace(value), ok && name != ""
+}
+
 // Check runs spec (the value of a SECRET_CHECK_* line) with key substituted in.
 // An empty spec yields None.
 func Check(ctx context.Context, client *http.Client, spec, key string) Result {
@@ -65,33 +97,25 @@ func Check(ctx context.Context, client *http.Client, spec, key string) Result {
 	if spec == "" {
 		return Result{Status: None}
 	}
+	if err := ValidateSpec(spec); err != nil {
+		return Result{Status: Unverified, Detail: "Invalid key check: " + err.Error() + "."}
+	}
 	key = strings.TrimSpace(key)
 
 	parts := strings.Split(spec, "|")
-	rawURL := strings.TrimSpace(parts[0])
-	headers := parts[1:]
-
-	u, err := url.Parse(strings.ReplaceAll(rawURL, placeholder, url.QueryEscape(key)))
-	if err != nil || u.Scheme != "https" || u.Host == "" {
-		return Result{Status: Unverified, Detail: "The configured check URL must be a valid https:// URL."}
+	u, err := url.Parse(strings.ReplaceAll(strings.TrimSpace(parts[0]), placeholder, url.QueryEscape(key)))
+	if err != nil {
+		return Result{Status: Unverified, Detail: "Invalid key check: the check URL isn't valid once the key is filled in."}
 	}
 	host := u.Host
-
-	if !strings.Contains(spec, placeholder) {
-		return Result{Status: Unverified, Host: host, Detail: "The configured check never uses " + placeholder + ", so it can't test this key."}
-	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
 	if err != nil {
 		return Result{Status: Unverified, Host: host, Detail: "Couldn't build the check request."}
 	}
-	for _, h := range headers {
-		name, value, ok := strings.Cut(h, ":")
-		name = strings.TrimSpace(name)
-		if !ok || name == "" {
-			return Result{Status: Unverified, Host: host, Detail: fmt.Sprintf("Malformed header in the configured check: %q", strings.TrimSpace(h))}
-		}
-		req.Header.Set(name, strings.TrimSpace(strings.ReplaceAll(value, placeholder, key)))
+	for _, h := range parts[1:] {
+		name, value, _ := parseHeader(h) // shape already checked by ValidateSpec
+		req.Header.Set(name, strings.ReplaceAll(value, placeholder, key))
 	}
 
 	resp, err := client.Do(req)
@@ -101,7 +125,7 @@ func Check(ctx context.Context, client *http.Client, spec, key string) Result {
 	}
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
-	snippet := redact(collapse(string(body)), key)
+	snippet := redact(errorSummary(body), key)
 
 	switch {
 	case resp.StatusCode >= 200 && resp.StatusCode < 300:
@@ -142,6 +166,32 @@ func redact(text, key string) string {
 func looksLikeQuota(body string) bool {
 	lower := strings.ToLower(body)
 	return strings.Contains(lower, "quota") || strings.Contains(lower, "rate limit") || strings.Contains(lower, "ratelimit")
+}
+
+// errorSummary turns an error response body into something short to show. Most
+// APIs answer with JSON carrying a human message ({"error":{"message":...}},
+// {"error":"..."}, {"message":"..."}); that message is far more useful than
+// the raw blob. Anything else is shown flattened and truncated.
+func errorSummary(body []byte) string {
+	var doc struct {
+		Error   json.RawMessage `json:"error"`
+		Message string          `json:"message"`
+	}
+	if json.Unmarshal(body, &doc) == nil {
+		var nested struct {
+			Message string `json:"message"`
+		}
+		var plain string
+		switch {
+		case json.Unmarshal(doc.Error, &nested) == nil && nested.Message != "":
+			return collapse(nested.Message)
+		case json.Unmarshal(doc.Error, &plain) == nil && plain != "":
+			return collapse(plain)
+		case doc.Message != "":
+			return collapse(doc.Message)
+		}
+	}
+	return collapse(string(body))
 }
 
 // collapse flattens a response body to one short line for display.

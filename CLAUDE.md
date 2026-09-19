@@ -75,8 +75,12 @@ encrypts database backups at rest.
   gives an `https://` URL plus `|`-separated headers with `{KEY}` where the
   secret goes; `gui/secretcheck` GETs it before Deploy. Only a 400/401/403
   blocks (Deploy again overrides); rate limits/5xx/network errors just warn.
-  The request comes from `deploy.conf` on disk, never from the frontend, and
-  the key is redacted from any text shown. `create.sh` ignores these lines.
+  The Config tab edits them per extra-env row (URL box, headers box, and a
+  "Key to test with" button that tries the unsaved values); saving rewrites
+  or removes the matching lines and validates the spec (`secretcheck.ValidateSpec`).
+  At Deploy time the request comes from `deploy.conf` on disk, not from the
+  frontend, and the key is redacted from any text shown. `create.sh` ignores
+  these lines, and `deployconf.writeValue` quotes `&`/`|` so sourcing is safe.
   Nothing else needs a check: the GPG passphrase already fails in `create.sh`
   before any cloud resource exists, and the SQL user/password are chosen by
   the operator, not validated by anything external.

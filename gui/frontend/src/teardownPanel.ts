@@ -1,4 +1,4 @@
-import { runDelete, listSSHKeys, loadSecrets, loadSettings, saveSecrets } from "./api";
+import { runDelete, listSSHKeys, loadSecrets, loadSettings, openBackupsFolder, saveSecrets } from "./api";
 import { createLogPane } from "./logPane";
 import { refreshStatus, scheduleStatusReconcile } from "./appPanel";
 import { state, preflightPassed, isDeployed, isGameRunning, hasFailedExit, getGameRun, clearGameRun, notify } from "./state";
@@ -215,6 +215,21 @@ export function createTeardownPanel(): { el: HTMLElement; render: () => void } {
   backupLabelNo.style.fontWeight = "normal";
   backupLabelNo.append(backupNo, " Skip backup");
 
+  // Same button as the deploy panel's: the backups this teardown writes (and
+  // any earlier ones) are worth being able to inspect while the game is up.
+  const openBackupsButton = document.createElement("button");
+  openBackupsButton.type = "button";
+  openBackupsButton.className = "secondary";
+  openBackupsButton.textContent = "Open backups folder";
+  // Stays clickable even while the rest of the panel is disabled (e.g.
+  // preflight failing) — it's just inspecting files, not tearing anything down.
+  openBackupsButton.style.pointerEvents = "auto";
+  openBackupsButton.onclick = () => void openBackupsFolder(state.opsDir, state.appName);
+
+  const actionRow = document.createElement("div");
+  actionRow.className = "row";
+  actionRow.append(openBackupsButton, teardownButton);
+
   const runSummary = createRunSummary("delete");
 
   // Hidden while a teardown is in flight — same reasoning as the deploy
@@ -226,7 +241,7 @@ export function createTeardownPanel(): { el: HTMLElement; render: () => void } {
     gpgPassphraseWrap,
     gpgConfirmWrap,
     gpgMismatchWarning,
-    teardownButton,
+    actionRow,
   ];
 
   el.append(
@@ -237,7 +252,7 @@ export function createTeardownPanel(): { el: HTMLElement; render: () => void } {
     gpgPassphraseWrap,
     gpgConfirmWrap,
     gpgMismatchWarning,
-    teardownButton,
+    actionRow,
     runSummary.el,
     logPane.el,
     status,

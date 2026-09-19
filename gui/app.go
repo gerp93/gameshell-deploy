@@ -328,6 +328,22 @@ func (a *App) CheckExtraSecret(opsDir, appName, envName, value string) (secretch
 	return secretcheck.Check(ctx, secretcheck.NewClient(), spec, value), nil
 }
 
+// TestSecretCheck runs a check spec the operator is still editing in the
+// Config tab (not yet saved to deploy.conf) against a key, so they can see it
+// work before saving. Same rules and redaction as CheckExtraSecret; the
+// result names the host the key was sent to.
+func (a *App) TestSecretCheck(spec, value string) secretcheck.Result {
+	ctx, cancel := context.WithTimeout(a.ctx, 15*time.Second)
+	defer cancel()
+	return secretcheck.Check(ctx, secretcheck.NewClient(), spec, value)
+}
+
+// GetVersion returns the version this build was stamped with (see appVersion
+// in main.go) — "0.0.0-dev" for a local build.
+func (a *App) GetVersion() string {
+	return appVersion
+}
+
 // ConfiguredSecretChecks returns which of envNames (resolved extra env var
 // names) have a SECRET_CHECK_* line in the game's deploy.conf, so the UI only
 // offers to test keys that can actually be tested.

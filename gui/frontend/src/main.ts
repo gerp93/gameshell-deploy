@@ -1,4 +1,4 @@
-import { openOpsDir, checkForUpdate, applyUpdate } from "./api";
+import { openOpsDir, checkForUpdate, applyUpdate, getVersion } from "./api";
 import { createPreflightPanel } from "./preflightPanel";
 import { createAppPanel } from "./appPanel";
 import { createGameHeader } from "./gameHeader";
@@ -62,7 +62,22 @@ updateButton.onclick = () => {
   })();
 };
 
-headerActions.append(themeSwitcher, openFolderButton, updateButton);
+// Which build this is, beside the update check so "am I on the latest?" is
+// answerable at a glance. A local build (never stamped by the release
+// workflow) reports "0.0.0-dev"; shown as "dev build" rather than a version
+// that looks real.
+const versionLabel = document.createElement("span");
+versionLabel.className = "app-version";
+versionLabel.title = "Installed version";
+void getVersion()
+  .then((version) => {
+    versionLabel.textContent = version.endsWith("-dev") ? "dev build" : version.startsWith("v") ? version : `v${version}`;
+  })
+  .catch(() => {
+    // Purely informational; an unreadable version just leaves the label blank.
+  });
+
+headerActions.append(themeSwitcher, openFolderButton, versionLabel, updateButton);
 header.appendChild(headerActions);
 
 const preflight = createPreflightPanel();

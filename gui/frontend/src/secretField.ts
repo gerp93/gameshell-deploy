@@ -32,6 +32,8 @@ export interface SecretField {
   // Runs the check now, exactly as clicking the button does, and returns the
   // result; null when there is no checker or the field is empty.
   runCheck(): Promise<SecretCheckResult | null>;
+  // Drops the last check result — for when what it tested has since changed.
+  clearCheck(): void;
 }
 
 export function createSecretField(
@@ -221,5 +223,5 @@ export function createSecretField(
   }
 
   wrap.append(label, input, radioGroup, hint, checkRow);
-  return { wrap, input, applyLoaded, reset, refreshTypedHint, setChecker, runCheck };
+  return { wrap, input, applyLoaded, reset, refreshTypedHint, setChecker, runCheck, clearCheck: clearCheckResult };
 }

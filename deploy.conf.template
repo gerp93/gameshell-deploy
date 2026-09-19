@@ -28,7 +28,8 @@ ENV_VAR_PREFIX=MY_GAME
 EXTRA_ENV_VARS=
 
 # Optional: test an EXTRA_ENV_VARS key against the service that issued it
-# before deploying (GUI only - create.sh ignores these lines). One line per
+# before deploying (GUI only - create.sh ignores these lines; the GUI's Config
+# tab can edit and test them, or write them here by hand). One line per
 # key, named after its EXTRA_ENV_VARS entry without the '+':
 #   SECRET_CHECK_<NAME>="<https URL>|<Header: value>|<Header: value>"
 # The request is a GET. {KEY} is replaced with the key (URL-escaped inside the
