@@ -102,6 +102,62 @@ export function createDeployPanel(): { el: HTMLElement; render: () => void } {
   extraEnvWrap.className = "field-grid";
   extraEnvWrap.style.display = "none";
   const extraEnvFields = new Map<string, SecretField>();
+
+  // One button tests every extra key at once, using whatever value is in each
+  // field right now (so the environment-vs-keychain choice made above is what
+  // gets tested). Each key shows Pass / Failed / Skipped beside its field —
+  // Skipped when no key check is enabled for it in the Config tab.
+  const testAllRow = document.createElement("div");
+  testAllRow.className = "test-all-row";
+  const testAllButton = document.createElement("button");
+  testAllButton.type = "button";
+  testAllButton.className = "secondary";
+  testAllButton.textContent = "Test all keys";
+  // Testing keys needs no DigitalOcean access, so this stays clickable even
+  // while the rest of the panel is dimmed by a failing prerequisite check.
+  testAllButton.style.pointerEvents = "auto";
+  const testAllSummary = document.createElement("span");
+  testAllSummary.className = "secret-check-result";
+  testAllRow.append(testAllButton, testAllSummary);
+
+  function clearTestSummary() {
+    testAllSummary.textContent = "";
+    testAllSummary.className = "secret-check-result";
+  }
+
+  testAllButton.onclick = async () => {
+    testAllButton.disabled = true;
+    testAllSummary.className = "secret-check-result";
+    testAllSummary.textContent = "Testing…";
+    const entries = [...extraEnvFields];
+    const results = await Promise.all(entries.map(([, field]) => field.runCheck()));
+
+    let pass = 0;
+    let failed = 0;
+    let unverified = 0;
+    let skipped = 0;
+    for (const [i, [, field]] of entries.entries()) {
+      const result = results[i];
+      if (result === null) {
+        skipped++;
+        field.showSkipped(field.hasChecker() ? "the field is empty." : "no key check is enabled for it in the Config tab.");
+      } else if (result.status === "ok") {
+        pass++;
+      } else if (result.status === "invalid") {
+        failed++;
+      } else {
+        unverified++;
+      }
+    }
+
+    const parts = [`${pass} pass`, `${failed} failed`];
+    if (unverified > 0) parts.push(`${unverified} couldn't verify`);
+    parts.push(`${skipped} skipped`);
+    testAllSummary.textContent = parts.join(" · ");
+    testAllSummary.className = `secret-check-result ${failed > 0 ? "fail" : pass > 0 && unverified === 0 ? "ok" : ""}`.trim();
+    testAllButton.disabled = false;
+  };
+
   let extraEnvFor = "";
   // What the fields' "Test key" buttons were last attached for. Checks are
   // editable in the Config tab, so saving there must update these without
@@ -131,8 +187,19 @@ export function createDeployPanel(): { el: HTMLElement; render: () => void } {
     extraEnvWrap.innerHTML = "";
     extraEnvFields.clear();
     extraEnvWrap.style.display = names.length ? "" : "none";
+    clearTestSummary();
+    extraEnvWrap.appendChild(testAllRow);
     for (const name of names) {
-      const field = createSecretField(name, "password", () => void render());
+      // Editing a key (or switching its source) makes the last summary stale.
+      const field = createSecretField(
+        name,
+        "password",
+        () => {
+          clearTestSummary();
+          void render();
+        },
+        clearTestSummary,
+      );
       extraEnvWrap.appendChild(field.wrap);
       extraEnvFields.set(name, field);
     }
@@ -150,7 +217,8 @@ export function createDeployPanel(): { el: HTMLElement; render: () => void } {
       const configured = new Set((await configuredSecretChecks(opsDir, appName, names)) ?? []);
       if (extraEnvFor !== forKey) return;
       for (const [name, field] of extraEnvFields) {
-        field.setChecker(configured.has(name) ? (value) => checkExtraSecret(opsDir, appName, name, value) : null);
+        // No per-field button: "Test all keys" above the fields runs them all.
+        field.setChecker(configured.has(name) ? (value) => checkExtraSecret(opsDir, appName, name, value) : null, false);
       }
     } catch (err) {
       // Untested keys are still deployable, but say so — silently showing no

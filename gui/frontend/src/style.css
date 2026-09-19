@@ -627,13 +627,6 @@ button.secondary:hover:not(:disabled) {
   border-left: 2px solid var(--border);
 }
 
-.secret-check-config > summary {
-  cursor: pointer;
-  font-size: 0.82rem;
-  color: var(--text-muted);
-  margin-bottom: 0.4rem;
-}
-
 .secret-check-config input[type="text"],
 .secret-check-config textarea {
   width: 100%;
@@ -657,4 +650,28 @@ button.secondary:hover:not(:disabled) {
   color: var(--text-muted);
   white-space: nowrap;
   align-self: center;
+}
+
+/* Spans both columns of the extra-keys grid, above the individual fields. */
+.test-all-row {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin: 0 0 0.6rem;
+  font-size: 0.85rem;
+}
+
+.test-all-row button {
+  flex: none;
+  white-space: nowrap;
+}
+
+/* display:flex/inline rules above would otherwise beat the UA [hidden] rule. */
+.secret-check-row button[hidden] {
+  display: none;
+}
+
+.secret-check-config[hidden] {
+  display: none;
 }

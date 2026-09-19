@@ -115,7 +115,7 @@ export function createConfigForm(): { el: HTMLElement; render: () => void } {
   const extraEnvHint = document.createElement("p");
   extraEnvHint.className = "hint";
   extraEnvHint.textContent =
-    "One name per row. Check concat with prefix to prepend ENV_VAR_PREFIX (e.g. YT_API_KEY → TRACK_TIMELINE_YT_API_KEY). Each row can also have a key check: the GUI tests the key against its service before deploying.";
+    'One name per row. Check concat with prefix to prepend ENV_VAR_PREFIX (e.g. YT_API_KEY → TRACK_TIMELINE_YT_API_KEY). Tick "Enable key check" on a row to have the Deploy tab test that key against its service.';
   const extraEnvList = document.createElement("div");
   extraEnvList.className = "extra-env-list";
   const extraEnvAdd = document.createElement("button");
@@ -127,12 +127,14 @@ export function createConfigForm(): { el: HTMLElement; render: () => void } {
 
   type ExtraEnvRow = {
     // Holds the name row and the key-check editor beneath it; this is what
-    // gets removed, while `wrap` is just the flex row of name/checkbox/Remove.
+    // gets removed, while `wrap` is just the flex row of name/checkboxes/Remove.
     item: HTMLElement;
     wrap: HTMLElement;
     nameInput: HTMLInputElement;
     prefixCheck: HTMLInputElement;
     resolved: HTMLElement;
+    // Whether the Deploy tab should test this key at all.
+    enableCheck: HTMLInputElement;
     checkUrl: HTMLInputElement;
     checkHeaders: HTMLTextAreaElement;
   };
@@ -180,13 +182,23 @@ export function createConfigForm(): { el: HTMLElement; render: () => void } {
     remove.textContent = "Remove";
 
     // --- key check editor -------------------------------------------------
-    // Stored as SECRET_CHECK_<name> (see secretCheckSpec.ts). Open by default
-    // only when one is already set, so an unconfigured row stays compact.
+    // Stored as SECRET_CHECK_<name> (see secretCheckSpec.ts). "Enable key
+    // check" is what marks a key as one the Deploy tab tests: it's on when a
+    // check is already saved for this row, and the editor below only exists
+    // while it's on. Saving with it off drops the row's SECRET_CHECK line.
     const parts = splitSpec(spec);
-    const details = document.createElement("details");
-    details.className = "secret-check-config";
-    details.open = parts.url !== "";
-    const summary = document.createElement("summary");
+    const enableLabel = document.createElement("label");
+    enableLabel.className = "extra-env-check";
+    const enableCheck = document.createElement("input");
+    enableCheck.type = "checkbox";
+    enableCheck.checked = parts.url !== "";
+    enableLabel.append(enableCheck, document.createTextNode(" Enable key check"));
+
+    const body = document.createElement("div");
+    body.className = "secret-check-config";
+    body.hidden = !enableCheck.checked;
+    const hostHint = document.createElement("p");
+    hostHint.className = "hint";
 
     const urlField = document.createElement("div");
     urlField.className = "field";
@@ -241,27 +253,31 @@ export function createConfigForm(): { el: HTMLElement; render: () => void } {
         prefilledFor = "";
       }
     }
-    details.ontoggle = () => {
-      if (details.open) void prefill();
-    };
-
-    function refreshSummary() {
+    function refreshHostHint() {
       const host = specHost(joinSpec(checkUrl.value, checkHeaders.value));
-      summary.textContent = checkUrl.value.trim()
-        ? `Key check${host ? ` — sends the key to ${host}` : ""}`
-        : "Key check (optional) — not set";
+      hostHint.textContent = host ? `Sends the key to ${host}.` : "";
+      hostHint.hidden = !host;
     }
     const onSpecEdit = () => {
       testField.clearCheck();
-      refreshSummary();
+      refreshHostHint();
     };
     checkUrl.oninput = onSpecEdit;
     checkHeaders.oninput = onSpecEdit;
-    refreshSummary();
+    refreshHostHint();
 
-    details.append(summary, urlField, headersField, checkHint, testField.wrap);
+    // The values typed into the editor stay in place while the box is
+    // unticked, so ticking it again in the same session restores them; they
+    // only stop being saved.
+    enableCheck.onchange = () => {
+      body.hidden = !enableCheck.checked;
+      testField.clearCheck();
+      if (enableCheck.checked) void prefill();
+    };
 
-    const row: ExtraEnvRow = { item, wrap, nameInput, prefixCheck, resolved, checkUrl, checkHeaders };
+    body.append(urlField, headersField, hostHint, checkHint, testField.wrap);
+
+    const row: ExtraEnvRow = { item, wrap, nameInput, prefixCheck, resolved, enableCheck, checkUrl, checkHeaders };
     nameInput.oninput = () => updateRowResolved(row);
     prefixCheck.onchange = () => updateRowResolved(row);
     remove.onclick = () => {
@@ -270,12 +286,12 @@ export function createConfigForm(): { el: HTMLElement; render: () => void } {
       if (idx >= 0) extraEnvRows.splice(idx, 1);
     };
 
-    wrap.append(nameInput, checkLabel, resolved, remove);
-    item.append(wrap, details);
+    wrap.append(nameInput, checkLabel, enableLabel, resolved, remove);
+    item.append(wrap, body);
     extraEnvList.appendChild(item);
     extraEnvRows.push(row);
     updateRowResolved(row);
-    if (details.open) void prefill();
+    if (enableCheck.checked) void prefill();
   }
 
   extraEnvAdd.onclick = () => addExtraEnvRow();
@@ -289,16 +305,24 @@ export function createConfigForm(): { el: HTMLElement; render: () => void } {
     );
   }
 
-  // One SECRET_CHECK_<name> per row that has a URL. A row without a URL saves
-  // no check, which also removes any existing line for it (see deployconf.Save).
+  // One SECRET_CHECK_<name> per row with "Enable key check" ticked. A row with
+  // it unticked saves no check, which also removes any existing line for it
+  // (see deployconf.Save).
   function secretChecksFromRows(): SecretCheckEntry[] {
     const checks: SecretCheckEntry[] = [];
     for (const r of extraEnvRows) {
       const name = r.nameInput.value.trim();
       const spec = joinSpec(r.checkUrl.value, r.checkHeaders.value);
-      if (name && spec) checks.push({ name, spec });
+      if (name && r.enableCheck.checked && spec) checks.push({ name, spec });
     }
     return checks;
+  }
+
+  // Enabled but no URL would silently save nothing — say so instead.
+  function enabledChecksMissingURL(): string[] {
+    return extraEnvRows
+      .filter((r) => r.enableCheck.checked && !r.checkUrl.value.trim())
+      .map((r) => r.nameInput.value.trim() || "(unnamed)");
   }
 
   function fillExtraEnvRows(raw: string, checks: SecretCheckEntry[]) {
@@ -368,6 +392,11 @@ export function createConfigForm(): { el: HTMLElement; render: () => void } {
     // keyboard Enter-to-submit from a focused field.
     if (configLocked()) {
       message.textContent = "Can't save while a deploy or teardown is running for this game.";
+      return;
+    }
+    const missingURL = enabledChecksMissingURL();
+    if (missingURL.length > 0) {
+      message.textContent = `Enter a check URL for ${missingURL.join(", ")}, or untick "Enable key check".`;
       return;
     }
     try {

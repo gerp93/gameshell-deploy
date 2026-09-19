@@ -25,13 +25,19 @@ export interface SecretField {
   // secrets" checkbox state — call when that checkbox changes, for any
   // field the operator has already typed into.
   refreshTypedHint(remember: boolean): void;
-  // Adds a "Test key" button that runs check against the current value (the
-  // deploy.conf-configured request — see secretcheck.go). Pass null to remove
-  // it. Only fields whose key has a check configured should get one.
-  setChecker(check: ((value: string) => Promise<SecretCheckResult>) | null): void;
+  // Attaches a check to run against the current value (the deploy.conf
+  // request — see secretcheck.go); null removes it. Only fields whose key has
+  // a check enabled should get one. showButton adds a per-field "Test key"
+  // button; the Deploy tab passes false because it has one shared "Test all
+  // keys" button instead.
+  setChecker(check: ((value: string) => Promise<SecretCheckResult>) | null, showButton?: boolean): void;
+  hasChecker(): boolean;
   // Runs the check now, exactly as clicking the button does, and returns the
   // result; null when there is no checker or the field is empty.
   runCheck(): Promise<SecretCheckResult | null>;
+  // Shows this field as not tested, with the reason (no check enabled, or the
+  // field is empty).
+  showSkipped(reason: string): void;
   // Drops the last check result — for when what it tested has since changed.
   clearCheck(): void;
 }
@@ -101,12 +107,21 @@ export function createSecretField(
     checkToken++;
     checkResult.textContent = "";
     checkResult.className = "secret-check-result";
+    // With no checker (and so nothing to click) an empty row is just noise.
+    if (!checker) checkRow.hidden = true;
   }
 
   function showCheckResult(result: SecretCheckResult) {
-    const marks = { ok: "✓", invalid: "✗", unverified: "?", none: "" } as const;
+    const labels = { ok: "✓ Pass", invalid: "✗ Failed", unverified: "? Couldn't verify", none: "– Skipped" } as const;
     checkResult.className = `secret-check-result ${result.status === "ok" ? "ok" : result.status === "invalid" ? "fail" : ""}`.trim();
-    checkResult.textContent = `${marks[result.status]} ${result.detail}`.trim();
+    checkResult.textContent = `${labels[result.status]}${result.detail ? ` — ${result.detail}` : ""}`;
+  }
+
+  function showSkipped(reason: string) {
+    checkToken++;
+    checkRow.hidden = false;
+    checkResult.className = "secret-check-result";
+    checkResult.textContent = `– Skipped — ${reason}`;
   }
 
   async function runCheck(): Promise<SecretCheckResult | null> {
@@ -139,8 +154,9 @@ export function createSecretField(
     void runCheck();
   };
 
-  function setChecker(check: ((value: string) => Promise<SecretCheckResult>) | null) {
+  function setChecker(check: ((value: string) => Promise<SecretCheckResult>) | null, showButton = true) {
     checker = check;
+    checkButton.hidden = !showButton;
     checkRow.hidden = check === null;
     clearCheckResult();
   }
@@ -223,5 +239,16 @@ export function createSecretField(
   }
 
   wrap.append(label, input, radioGroup, hint, checkRow);
-  return { wrap, input, applyLoaded, reset, refreshTypedHint, setChecker, runCheck, clearCheck: clearCheckResult };
+  return {
+    wrap,
+    input,
+    applyLoaded,
+    reset,
+    refreshTypedHint,
+    setChecker,
+    hasChecker: () => checker !== null,
+    runCheck,
+    showSkipped,
+    clearCheck: clearCheckResult,
+  };
 }

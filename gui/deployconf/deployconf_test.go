@@ -107,8 +107,27 @@ func TestSavedChecksSurviveSourcingInBash(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	script := "set -e; source \"$1\"; printf '%s\\n%s' \"$SECRET_CHECK_YT_API_KEY\" \"$SECRET_CHECK_ANTHROPIC_API_KEY\""
-	out, err := exec.Command(bash, "-c", script, "bash", filepath.ToSlash(path)).CombinedOutput()
+	// Sourced by relative name from its own directory, with no positional
+	// args. On Windows "bash" may be the Store/WSL launcher stub, which can
+	// exit 0 without running anything, so first prove this bash can source a
+	// file from the temp dir; if it can't, the result below would be noise.
+	dir := filepath.Dir(path)
+	run := func(file, script string) (string, error) {
+		cmd := exec.Command(bash, "-c", "set -e; source ./"+file+"; "+script)
+		cmd.Dir = dir
+		out, err := cmd.CombinedOutput()
+		return string(out), err
+	}
+	if err := os.WriteFile(filepath.Join(dir, "probe.conf"), []byte("PROBE=ok\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := run("probe.conf", `printf %s "$PROBE"`); err != nil || got != "ok" {
+		t.Skipf("bash %q can't source files from a temp dir here (got %q, err %v)", bash, got, err)
+	}
+
+	script := `printf '%s\n%s' "$SECRET_CHECK_YT_API_KEY" "$SECRET_CHECK_ANTHROPIC_API_KEY"`
+	outStr, err := run(filepath.Base(path), script)
+	out := []byte(outStr)
 	if err != nil {
 		t.Fatalf("bash failed: %v\n%s", err, out)
 	}
