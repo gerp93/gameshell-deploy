@@ -22,6 +22,10 @@ export const state = {
   // Whether the selected game's branch has code that isn't deployed yet (see
   // codeCheck.ts). null until a check has been started for the selected game.
   codeCheck: null as CodeCheckState | null,
+  // Which form the Manage tab shows for a deployed game (see manageMode()).
+  // Defaults to the safe one and is put back to it whenever the game changes
+  // or a teardown finishes, so Teardown is never what you land on.
+  manageMode: "redeploy" as "redeploy" | "teardown",
 };
 
 // The latest "is there new code to redeploy?" answer for one game. result
@@ -144,6 +148,31 @@ export function preflightPassed(): boolean {
   if (!state.preflight) return false;
   if (state.preflight.wslBlocking) return false;
   return state.preflight.checks.every((c) => c.ok);
+}
+
+// True when the operator can choose between Redeploy and Teardown: the game
+// has a deployed app, and nothing is in flight or left half-done. Otherwise
+// only one of them makes sense and manageMode() picks it.
+export function manageSwitchAvailable(): boolean {
+  const appName = state.appName;
+  return (
+    Boolean(appName) &&
+    state.status?.appExists === true &&
+    runningKind(appName) === null &&
+    !hasFailedExit("create", appName)
+  );
+}
+
+// Which of Redeploy / Teardown the Manage tab shows right now. A run in flight
+// pins its own panel (so its progress stays on screen); no deployed app, or a
+// failed deploy that left resources behind, leaves only Teardown; otherwise
+// it's whatever the operator picked.
+export function manageMode(): "redeploy" | "teardown" {
+  const kind = runningKind(state.appName);
+  if (kind === "redeploy") return "redeploy";
+  if (kind === "delete") return "teardown";
+  if (!manageSwitchAvailable()) return "teardown";
+  return state.manageMode;
 }
 
 // isDeployed is null while status hasn't been checked yet (e.g. no game

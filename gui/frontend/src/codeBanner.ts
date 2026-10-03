@@ -33,6 +33,7 @@ export function createCodeBanner(): { el: HTMLElement; render: () => void } {
   reviewButton.textContent = "Review & redeploy";
   reviewButton.onclick = () => {
     state.activeTab = "action";
+    state.manageMode = "redeploy";
     notify();
   };
   const dismissButton = document.createElement("button");

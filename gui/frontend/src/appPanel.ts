@@ -178,6 +178,8 @@ export function createAppPanel(): { el: HTMLElement; render: () => void } {
 
   async function chooseApp(appName: string) {
     state.appName = appName;
+    // Never carry a Teardown selection over to another game.
+    state.manageMode = "redeploy";
     state.loadingGame = true;
     notify();
     try {

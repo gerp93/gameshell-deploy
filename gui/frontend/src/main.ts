@@ -7,6 +7,7 @@ import { createDeployPanel } from "./deployPanel";
 import { createTeardownPanel } from "./teardownPanel";
 import { createRedeployPanel } from "./redeployPanel";
 import { createCodeBanner } from "./codeBanner";
+import { createManageSwitch } from "./manageSwitch";
 import { startCodeCheckPolling } from "./codeCheck";
 import { createTabs } from "./tabs";
 import { createThemeSwitcher } from "./themeSwitcher";
@@ -101,11 +102,12 @@ const deploy = createDeployPanel();
 const teardown = createTeardownPanel();
 const redeploy = createRedeployPanel();
 const codeBanner = createCodeBanner();
+const manageSwitch = createManageSwitch();
 
-// Redeploy sits above Teardown: for a deployed game the common action is
-// shipping new code, the rare one is deleting everything.
+// A deployed game picks Redeploy or Teardown with the switch on top; only the
+// chosen form is shown, so the two sets of fields are never conflated.
 const actionTabContent = document.createElement("div");
-actionTabContent.append(deploy.el, redeploy.el, teardown.el);
+actionTabContent.append(manageSwitch.el, deploy.el, redeploy.el, teardown.el);
 
 const tabs = createTabs(
   [
@@ -155,6 +157,7 @@ subscribe(() => {
   // deploy/teardown each re-point their log pane at state.appName on every
   // render (see logPane.showGame) — a game deploying in the background
   // keeps streaming into its own history even while another game is shown.
+  manageSwitch.render();
   deploy.render();
   redeploy.render();
   teardown.render();

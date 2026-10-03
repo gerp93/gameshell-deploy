@@ -1,7 +1,17 @@
 import { runDelete, listSSHKeys, loadSecrets, loadSettings, openBackupsFolder, saveSecrets } from "./api";
 import { createLogPane } from "./logPane";
 import { refreshStatus, scheduleStatusReconcile } from "./appPanel";
-import { state, preflightPassed, isDeployed, isGameRunning, hasFailedExit, getGameRun, clearGameRun, notify } from "./state";
+import {
+  state,
+  preflightPassed,
+  isDeployed,
+  isGameRunning,
+  hasFailedExit,
+  getGameRun,
+  clearGameRun,
+  manageMode,
+  notify,
+} from "./state";
 import { createRunSummary } from "./runSummary";
 import { createSecretField } from "./secretField";
 
@@ -139,6 +149,8 @@ export function createTeardownPanel(): { el: HTMLElement; render: () => void } {
       // failure (partial/unknown state) needs a real re-check.
       if (info.code === 0) {
         state.status = { dropletExists: false, appExists: false, appURL: "" };
+        // Whatever gets deployed next should open on Redeploy, not Teardown.
+        state.manageMode = "redeploy";
         // A *successful* prior deploy's history is now stale — leaving it in
         // place is what made switching to Deploy right after tearing down a
         // healthy game show an unrelated old run. A *failed* deploy's record
@@ -293,7 +305,12 @@ export function createTeardownPanel(): { el: HTMLElement; render: () => void } {
     // game (see scriptrunner.go's claim), so a teardown started now would just
     // fail with "a run is already in progress".
     const redeploying = isGameRunning("redeploy", state.appName);
-    const show = Boolean(state.appName) && !deploying && !redeploying && (running || isDeployed() === true);
+    const show =
+      Boolean(state.appName) &&
+      !deploying &&
+      !redeploying &&
+      manageMode() === "teardown" &&
+      (running || isDeployed() === true);
     el.style.display = show ? "" : "none";
     if (!show) return;
 

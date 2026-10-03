@@ -3,7 +3,7 @@ import { createLogPane } from "./logPane";
 import { refreshStatus } from "./appPanel";
 import { commitsText, shortSha } from "./codeBanner";
 import { currentCodeCheck, refreshCodeCheck } from "./codeCheck";
-import { state, preflightPassed, isGameRunning, getGameRun, clearGameRun, notify } from "./state";
+import { state, preflightPassed, isGameRunning, getGameRun, clearGameRun, manageMode, notify } from "./state";
 import { createRunSummary } from "./runSummary";
 import { createSecretField } from "./secretField";
 
@@ -374,10 +374,15 @@ export function createRedeployPanel(): { el: HTMLElement; render: () => void } {
 
   function render() {
     // A deploy or teardown in flight owns the Action tab; otherwise this panel
-    // is offered whenever there's a deployed app to redeploy.
+    // is offered whenever there's a deployed app to redeploy and the Manage
+    // tab's switch is on Redeploy (see manageSwitch.ts).
     const running = isGameRunning("redeploy", state.appName);
     const otherRunning = isGameRunning("create", state.appName) || isGameRunning("delete", state.appName);
-    const show = Boolean(state.appName) && !otherRunning && (running || state.status?.appExists === true);
+    const show =
+      Boolean(state.appName) &&
+      !otherRunning &&
+      manageMode() === "redeploy" &&
+      (running || state.status?.appExists === true);
     el.style.display = show ? "" : "none";
     if (!show) return;
 

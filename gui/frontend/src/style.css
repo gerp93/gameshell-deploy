@@ -327,6 +327,30 @@ body {
   font-size: 0.88rem;
 }
 
+/* Redeploy / Teardown radio pair at the top of a deployed game's Manage tab. */
+.mode-switch {
+  display: flex;
+  gap: 0.5rem;
+  margin: 0 0 0.9rem;
+}
+
+.mode-switch-option {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  margin: 0;
+  padding: 0.35rem 0.8rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.mode-switch-option:has(input:checked) {
+  border-color: var(--accent);
+  background: rgba(var(--accent-rgb), 0.12);
+}
+
 /* Destructive SQL the new commits add — the one thing worth stopping for. */
 .sql-warning {
   margin: 0.5rem 0 0.75rem;
