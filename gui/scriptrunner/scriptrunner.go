@@ -12,7 +12,6 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -383,13 +382,16 @@ type BalanceResult struct {
 // is. A scoped API token without billing access fails here, and the doctl
 // message is returned so the UI can say why.
 func GetBalance() (BalanceResult, error) {
-	out, err := runDoctl("balance", "get", "-o", "json")
+	cmd, err := platform.RawCommand("doctl", []string{"balance", "get", "-o", "json"})
 	if err != nil {
-		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) && len(bytes.TrimSpace(exitErr.Stderr)) > 0 {
-			return BalanceResult{}, fmt.Errorf("%s", bytes.TrimSpace(exitErr.Stderr))
-		}
 		return BalanceResult{}, err
+	}
+	// Combined, because with -o json doctl reports API errors on stdout as
+	// {"errors":[{"detail":...}]} rather than on stderr.
+	outBytes, err := cmd.CombinedOutput()
+	out := string(outBytes)
+	if err != nil {
+		return BalanceResult{}, balanceError(out, err)
 	}
 	var raw struct {
 		MonthToDateUsage string `json:"month_to_date_usage"`
@@ -404,6 +406,28 @@ func GetBalance() (BalanceResult, error) {
 		AccountBalance:   raw.AccountBalance,
 		GeneratedAt:      raw.GeneratedAt,
 	}, nil
+}
+
+// balanceError turns a failed `doctl balance get` into something the operator
+// can act on. A 403 is by far the likeliest failure: a custom-scoped API token
+// that can manage droplets/apps but has no billing access.
+func balanceError(output string, err error) error {
+	var parsed struct {
+		Errors []struct {
+			Detail string `json:"detail"`
+		} `json:"errors"`
+	}
+	detail := strings.TrimSpace(output)
+	if json.Unmarshal([]byte(detail), &parsed) == nil && len(parsed.Errors) > 0 {
+		detail = parsed.Errors[0].Detail
+	}
+	if strings.Contains(detail, "403") || strings.Contains(detail, "not authorized") {
+		return fmt.Errorf("this DigitalOcean API token isn't allowed to read billing (403). Use a token with billing/account read access (`doctl auth init`) to see spend")
+	}
+	if detail == "" {
+		return err
+	}
+	return fmt.Errorf("%s", detail)
 }
 
 func runDoctl(args ...string) (string, error) {

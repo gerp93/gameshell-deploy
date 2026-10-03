@@ -31,6 +31,10 @@ export function createPreflightPanel(): { el: HTMLElement; render: () => void } 
 
   el.append(summary, list);
 
+  // Games whose group the operator has expanded, kept across re-renders
+  // (render() rebuilds the list from scratch each time).
+  const openGames = new Set<string>();
+
   async function refresh() {
     const result = await runPreflightChecks();
     const hadFailure = state.preflight !== null && !allPassing(state.preflight);
@@ -43,7 +47,14 @@ export function createPreflightPanel(): { el: HTMLElement; render: () => void } 
   }
 
   function allPassing(result: NonNullable<typeof state.preflight>): boolean {
-    return !result.wslBlocking && result.checks.every((c) => c.ok);
+    return !result.wslBlocking && result.checks.every((c) => c.ok) && gameFailures(result) === 0;
+  }
+
+  // Failing per-game checks (see PreflightResult.games). Counted in the
+  // summary, but never part of state.ts's preflightPassed() — one game's
+  // unreachable repo must not stop the other games from deploying.
+  function gameFailures(result: NonNullable<typeof state.preflight>): number {
+    return (result.games ?? []).reduce((n, g) => n + g.checks.filter((c) => !c.ok).length, 0);
   }
 
   function render() {
@@ -55,7 +66,7 @@ export function createPreflightPanel(): { el: HTMLElement; render: () => void } 
       return;
     }
 
-    const failing = result.wslBlocking ? 1 : result.checks.filter((c) => !c.ok).length;
+    const failing = result.wslBlocking ? 1 : result.checks.filter((c) => !c.ok).length + gameFailures(result);
     const dotClass = failing === 0 ? "ok" : "fail";
     const label = failing === 0 ? "Prerequisites OK" : `Prerequisites — ${failing} issue${failing > 1 ? "s" : ""}`;
     const chevron = state.prereqExpanded ? "▾" : "▸";
@@ -75,12 +86,47 @@ export function createPreflightPanel(): { el: HTMLElement; render: () => void } 
     }
 
     for (const check of result.checks) {
-      const row = document.createElement("div");
-      row.className = "check-row";
-      row.innerHTML = `<span class="${check.ok ? "ok" : "fail"}">${check.ok ? "✓" : "✗"}</span> <strong>${check.name}</strong> — ${check.detail}`;
-      list.appendChild(row);
+      list.appendChild(checkRow(check));
+    }
+
+    // One expandable group per game, collapsed unless something in it failed
+    // (or the operator opened it), so a long list of healthy repos stays quiet.
+    for (const game of result.games ?? []) {
+      const bad = game.checks.filter((c) => !c.ok).length;
+      const group = document.createElement("details");
+      group.className = "prereq-game";
+      group.open = bad > 0 || openGames.has(game.game);
+      group.ontoggle = () => {
+        if (group.open) openGames.add(game.game);
+        else openGames.delete(game.game);
+      };
+      const heading = document.createElement("summary");
+      const mark = document.createElement("span");
+      mark.className = bad === 0 ? "ok" : "fail";
+      mark.textContent = bad === 0 ? "✓" : "✗";
+      const name = document.createElement("strong");
+      name.textContent = game.game;
+      const note = document.createElement("span");
+      note.className = "prereq-game-note";
+      note.textContent = bad === 0 ? "repos reachable" : `${bad} repo problem${bad > 1 ? "s" : ""} — other games are unaffected`;
+      heading.append(mark, name, note);
+      group.appendChild(heading);
+      for (const check of game.checks) group.appendChild(checkRow(check));
+      list.appendChild(group);
     }
     list.appendChild(refreshButton);
+  }
+
+  function checkRow(check: { name: string; ok: boolean; detail: string }): HTMLElement {
+    const row = document.createElement("div");
+    row.className = "check-row";
+    const mark = document.createElement("span");
+    mark.className = check.ok ? "ok" : "fail";
+    mark.textContent = check.ok ? "✓" : "✗";
+    const name = document.createElement("strong");
+    name.textContent = check.name;
+    row.append(mark, name, ` — ${check.detail}`);
+    return row;
   }
 
   void refresh();

@@ -12,6 +12,9 @@ export function createSpendBadge(): HTMLElement {
 
   async function refresh() {
     el.disabled = true;
+    // Visible feedback on click — the call goes out to DigitalOcean and can
+    // take a couple of seconds, and an unchanged "n/a" looks like nothing happened.
+    el.textContent = "DO this month: checking…";
     try {
       const balance = await getBalance();
       const usage = Number(balance.monthToDateUsage);
@@ -22,9 +25,11 @@ export function createSpendBadge(): HTMLElement {
         `Month-to-date usage for the whole Digital Ocean account${asOf} — not just these games. ` +
         "Click to refresh.";
     } catch (err) {
-      // Most often a scoped API token without billing access; not worth an alert.
-      el.textContent = "DO this month: n/a";
-      el.title = `Couldn't read Digital Ocean spend: ${err}. Click to retry.`;
+      // Usually a scoped API token without billing access; say so on the
+      // badge itself and keep the full message in the tooltip.
+      const message = err instanceof Error ? err.message : String(err);
+      el.textContent = /billing|403|not authorized/i.test(message) ? "DO this month: no billing access" : "DO this month: n/a";
+      el.title = `Couldn't read Digital Ocean spend: ${message} Click to retry.`;
     } finally {
       el.disabled = false;
     }

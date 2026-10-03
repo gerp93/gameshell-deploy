@@ -101,6 +101,37 @@ body {
   padding-bottom: 0.75rem;
 }
 
+/* Per-game expansion groups under the tool checks. */
+.prereq-game {
+  margin: 0.25rem 0;
+}
+
+.prereq-game > summary {
+  display: flex;
+  gap: 0.5rem;
+  align-items: baseline;
+  cursor: pointer;
+  padding: 0.15rem 0;
+  font-size: 0.9rem;
+}
+
+.prereq-game > summary .ok {
+  color: var(--ok);
+}
+
+.prereq-game > summary .fail {
+  color: var(--fail);
+}
+
+.prereq-game-note {
+  color: var(--text-muted);
+  font-size: 0.82rem;
+}
+
+.prereq-game > .check-row {
+  padding-left: 1.5rem;
+}
+
 /* Keeps Re-check clear of the last check row. */
 .prereq-list > button {
   margin-top: 0.6rem;

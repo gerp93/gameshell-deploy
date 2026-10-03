@@ -59,9 +59,17 @@ export interface CheckResult {
   detail: string;
 }
 
+// Per-game checks (e.g. that its git repos are reachable). A failure here only
+// concerns that game; it never gates other games or the tool-wide checks.
+export interface GameChecks {
+  game: string;
+  checks: CheckResult[];
+}
+
 export interface PreflightResult {
   wslBlocking: boolean;
   checks: CheckResult[];
+  games: GameChecks[];
 }
 
 export interface LogLine {
