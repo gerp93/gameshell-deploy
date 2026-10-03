@@ -11,6 +11,8 @@ package scriptrunner
 import (
 	"bufio"
 	"bytes"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -88,6 +90,21 @@ type DeleteRequest struct {
 	GPGPassphrase string `json:"gpgPassphrase"`
 }
 
+// RedeployRequest mirrors redeploy.sh's positional arg + flags. Backup is
+// "yes" or "no" like DeleteRequest; SSHKeyName is the DigitalOcean key the
+// pre-redeploy backup's ssh/scp is pinned to (unused when Backup is "no").
+// redeploy.sh is always run with --yes: the GUI has no TTY for its prompts, so
+// the destructive-SQL warning is shown and acknowledged in the panel *before*
+// this request is sent (see CheckRedeploy), not by the script.
+type RedeployRequest struct {
+	OpsDir        string `json:"opsDir"`
+	AppName       string `json:"appName"`
+	Backup        string `json:"backup"`
+	SSHKeyName    string `json:"sshKeyName"`
+	GPGPassphrase string `json:"gpgPassphrase"`
+	ForceRebuild  bool   `json:"forceRebuild"`
+}
+
 // runningCmds tracks the one in-flight script per app name — deploying or
 // tearing down the same game twice at once isn't allowed, but different
 // games run fully independently.
@@ -154,6 +171,27 @@ func RunDelete(req DeleteRequest, emit Emitter) error {
 	}
 	scriptPath := filepath.Join(req.OpsDir, "delete.sh")
 	return run(req.AppName, req.OpsDir, scriptPath, args, env, "delete", emit)
+}
+
+// RunRedeploy runs redeploy.sh to completion, streaming output via emit under
+// the "redeploy:log" / "redeploy:exit" events (each tagged with req.AppName).
+func RunRedeploy(req RedeployRequest, emit Emitter) error {
+	args := []string{req.AppName, "--yes"}
+	if req.Backup != "" {
+		args = append(args, "--backup="+req.Backup)
+	}
+	if req.SSHKeyName != "" {
+		args = append(args, "--ssh-key="+req.SSHKeyName)
+	}
+	if req.ForceRebuild {
+		args = append(args, "--force-rebuild")
+	}
+	var env []string
+	if req.GPGPassphrase != "" {
+		env = append(env, "GPG_PASSPHRASE="+req.GPGPassphrase)
+	}
+	scriptPath := filepath.Join(req.OpsDir, "redeploy.sh")
+	return run(req.AppName, req.OpsDir, scriptPath, args, env, "redeploy", emit)
 }
 
 // TierOption is one price tier create.sh's --list-tiers reported as
@@ -325,6 +363,47 @@ func CheckStatus(appName string) (StatusResult, error) {
 		break
 	}
 	return result, nil
+}
+
+// BalanceResult is `doctl balance get`'s month-to-date picture. The amounts
+// are DO's own decimal strings (e.g. "12.34", USD) passed through untouched,
+// so nothing here does float math on money.
+type BalanceResult struct {
+	// MonthToDateUsage is what the whole DO account has accrued this billing
+	// period — every droplet/app on the account, not just the ones this tool
+	// created.
+	MonthToDateUsage string `json:"monthToDateUsage"`
+	// AccountBalance is the balance as of the last billing activity.
+	AccountBalance string `json:"accountBalance"`
+	GeneratedAt    string `json:"generatedAt"`
+}
+
+// GetBalance reports this month's spend via `doctl balance get`. DO generates
+// the figure periodically rather than live, so GeneratedAt says how fresh it
+// is. A scoped API token without billing access fails here, and the doctl
+// message is returned so the UI can say why.
+func GetBalance() (BalanceResult, error) {
+	out, err := runDoctl("balance", "get", "-o", "json")
+	if err != nil {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) && len(bytes.TrimSpace(exitErr.Stderr)) > 0 {
+			return BalanceResult{}, fmt.Errorf("%s", bytes.TrimSpace(exitErr.Stderr))
+		}
+		return BalanceResult{}, err
+	}
+	var raw struct {
+		MonthToDateUsage string `json:"month_to_date_usage"`
+		AccountBalance   string `json:"account_balance"`
+		GeneratedAt      string `json:"generated_at"`
+	}
+	if err := json.Unmarshal([]byte(out), &raw); err != nil {
+		return BalanceResult{}, fmt.Errorf("could not read doctl balance output: %w", err)
+	}
+	return BalanceResult{
+		MonthToDateUsage: raw.MonthToDateUsage,
+		AccountBalance:   raw.AccountBalance,
+		GeneratedAt:      raw.GeneratedAt,
+	}, nil
 }
 
 func runDoctl(args ...string) (string, error) {

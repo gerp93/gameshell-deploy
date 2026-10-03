@@ -3,7 +3,24 @@
 // GUI lets an operator start a run.
 package preflight
 
-import "gameshell-deploy-gui/platform"
+import (
+	"bytes"
+	"errors"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"sort"
+	"strings"
+	"sync"
+	"time"
+
+	"gameshell-deploy-gui/deployconf"
+	"gameshell-deploy-gui/platform"
+)
+
+// repoCheckTimeout bounds each remote reachability probe so one unreachable
+// host can't hold the whole prerequisites bar on "Checking…".
+const repoCheckTimeout = 15 * time.Second
 
 // CheckResult is one prerequisite's pass/fail state plus a short
 // remediation hint shown when it fails.
@@ -22,8 +39,10 @@ type Result struct {
 	Checks      []CheckResult `json:"checks"`
 }
 
-// RunChecks runs every prerequisite check and returns their results.
-func RunChecks() Result {
+// RunChecks runs every prerequisite check and returns their results. opsDir
+// is the gameshell-deploy checkout (where games/ lives); when empty, only the
+// per-game repo reachability checks are skipped.
+func RunChecks(opsDir string) Result {
 	if platform.IsWindows() && !platform.WSLAvailable() {
 		return Result{
 			WSLBlocking: true,
@@ -43,6 +62,7 @@ func RunChecks() Result {
 		// but required here: the GUI's region/tier dropdowns are built from
 		// create.sh's --list-regions/--list-tiers, which refuse to guess
 		// without jq rather than offer combinations that 422 at create time.
+		checkTool("git", "git", "Install git (e.g. `sudo apt install git` inside WSL, or `brew install git` on macOS) — create.sh uses it to resolve the deploy branch and sync forks."),
 		checkTool("jq", "jq", "Install jq (e.g. `sudo apt install jq` inside WSL, or `brew install jq` on macOS) — the Deploy tab's region and price tier lists are built from it."),
 	}
 
@@ -52,7 +72,145 @@ func RunChecks() Result {
 		}, checks...)
 	}
 
+	// Without git every repo probe would fail for the same reason the git
+	// check above already reports.
+	if platform.LookPath("git") {
+		checks = append(checks, checkRepos(opsDir)...)
+	}
+
 	return Result{WSLBlocking: false, Checks: checks}
+}
+
+// repoTarget is one remote the games under games/ deploy from or sync with,
+// plus the games that name it.
+type repoTarget struct {
+	repo   string // "owner/name", as in deploy.conf
+	branch string // empty means the repo's default branch (HEAD)
+	games  []string
+}
+
+// checkRepos probes every GIT_REPO and GIT_UPSTREAM named by a game's
+// deploy.conf with the same `git ls-remote` create.sh runs before it creates
+// anything, so a bad repo name, a typo'd branch, or a private repo this
+// machine can't read shows up here instead of partway into a deploy.
+func checkRepos(opsDir string) []CheckResult {
+	if opsDir == "" {
+		return nil
+	}
+	targets := repoTargets(opsDir)
+	results := make([]CheckResult, len(targets))
+	var wg sync.WaitGroup
+	for i, t := range targets {
+		wg.Add(1)
+		go func(i int, t repoTarget) {
+			defer wg.Done()
+			results[i] = checkRepo(t)
+		}(i, t)
+	}
+	wg.Wait()
+	return results
+}
+
+// repoTargets collects the distinct repo+branch pairs across all games,
+// in a stable order.
+func repoTargets(opsDir string) []repoTarget {
+	entries, err := os.ReadDir(filepath.Join(opsDir, "games"))
+	if err != nil {
+		return nil
+	}
+	byKey := map[string]*repoTarget{}
+	var keys []string
+	add := func(repo, branch, game string) {
+		if repo == "" {
+			return
+		}
+		key := repo + "@" + branch
+		if t, ok := byKey[key]; ok {
+			t.games = append(t.games, game)
+			return
+		}
+		byKey[key] = &repoTarget{repo: repo, branch: branch, games: []string{game}}
+		keys = append(keys, key)
+	}
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		path := filepath.Join(opsDir, "games", e.Name(), "deploy.conf")
+		if !deployconf.Exists(path) {
+			continue
+		}
+		conf, err := deployconf.Load(path)
+		if err != nil {
+			continue // the Config tab surfaces an unreadable deploy.conf
+		}
+		add(conf.GitRepo, conf.GitBranch, e.Name())
+		add(conf.GitUpstream, conf.GitBranch, e.Name())
+	}
+	sort.Strings(keys)
+	targets := make([]repoTarget, 0, len(keys))
+	for _, k := range keys {
+		targets = append(targets, *byKey[k])
+	}
+	return targets
+}
+
+func checkRepo(t repoTarget) CheckResult {
+	name := "Repo " + t.repo
+	where := "(" + strings.Join(t.games, ", ") + ")"
+
+	// Same URL form and queries as create.sh. GIT_TERMINAL_PROMPT=0 makes a
+	// repo that wants credentials fail fast instead of waiting on a prompt
+	// nobody can answer.
+	args := []string{"GIT_TERMINAL_PROMPT=0", "git", "ls-remote", "--exit-code"}
+	branchLabel := "default branch"
+	if t.branch != "" {
+		args = append(args, "--heads", "https://github.com/"+t.repo+".git", t.branch)
+		branchLabel = "branch " + t.branch
+	} else {
+		args = append(args, "https://github.com/"+t.repo+".git", "HEAD")
+	}
+
+	cmd, err := platform.RawCommand("env", args)
+	if err != nil {
+		return CheckResult{Name: name, OK: false, Detail: err.Error()}
+	}
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Start(); err != nil {
+		return CheckResult{Name: name, OK: false, Detail: err.Error()}
+	}
+	timedOut := false
+	timer := time.AfterFunc(repoCheckTimeout, func() {
+		timedOut = true
+		_ = cmd.Process.Kill()
+	})
+	err = cmd.Wait()
+	timer.Stop()
+
+	if err == nil {
+		return CheckResult{Name: name, OK: true, Detail: branchLabel + " reachable " + where + "."}
+	}
+	if timedOut {
+		return CheckResult{Name: name, OK: false, Detail: "timed out reaching github.com " + where + " — check the network connection."}
+	}
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) && exitErr.ExitCode() == 2 {
+		return CheckResult{Name: name, OK: false, Detail: "repo is reachable but has no " + branchLabel + " " + where + " — fix GIT_BRANCH in deploy.conf (blank uses the default branch)."}
+	}
+	reason := firstLine(stderr.String())
+	if reason == "" {
+		reason = err.Error()
+	}
+	return CheckResult{Name: name, OK: false, Detail: reason + " " + where + " — check GIT_REPO/GIT_UPSTREAM in deploy.conf; a private repo needs git credentials on this machine."}
+}
+
+func firstLine(s string) string {
+	s = strings.TrimSpace(s)
+	if i := strings.IndexAny(s, "\r\n"); i >= 0 {
+		s = s[:i]
+	}
+	return s
 }
 
 func checkTool(bin, name, hint string) CheckResult {

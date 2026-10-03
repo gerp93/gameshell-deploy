@@ -52,9 +52,26 @@ export DEPLOY_SQL_PASSWORD=...
 # back up and tear down
 ./delete.sh timeline-trivia
 ./delete.sh card-judge
+
+# ship new app code to a running instance (database droplet untouched)
+./redeploy.sh timeline-trivia
+./redeploy.sh card-judge
 ```
 
 Just pass the app name; config and backups are read from `games/{APP_NAME}/`.
+
+`redeploy.sh` is for new code, not infrastructure: it syncs the fork, warns if
+the commits about to ship add destructive SQL (`DROP`, `DELETE`, `UPDATE`,
+`TRUNCATE`, `MODIFY`/`CHANGE` column), takes a fresh encrypted backup of the
+live database, then has App Platform build and roll out the latest commit.
+The games apply their own idempotent schema migrations on startup, so the live
+database is migrated in place; if the new build fails to start, the previous
+one keeps serving. It does not re-render the app spec, so changed env vars
+(SQL host, extra API keys) or app size need a teardown and create instead.
+Flags: `--backup=yes|no`, `--ssh-key=NAME`, `--force-rebuild`, `--yes`.
+`./redeploy.sh APP_NAME --check` is read-only: it reports whether the branch has
+commits that aren't deployed yet (the GUI uses it to show a "new code
+available" notice) and exits without prompting, backing up, or deploying.
 
 Restoring/creating a backup decrypts/encrypts it with `gpg`, which normally
 prompts interactively for the passphrase — fine in a terminal. To run

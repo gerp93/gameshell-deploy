@@ -11,6 +11,7 @@ games/*/backups/*
 # as backups: useful after a failed run, not shared tooling
 games/*/last-create.log
 games/*/last-delete.log
+games/*/last-redeploy.log
 
 # gui/ (Wails app) build artifacts and generated bindings
 gui/frontend/dist/

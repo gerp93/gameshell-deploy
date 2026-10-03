@@ -289,7 +289,11 @@ export function createTeardownPanel(): { el: HTMLElement; render: () => void } {
     // once its droplet starts existing.
     const running = isGameRunning("delete", state.appName);
     const deploying = isGameRunning("create", state.appName);
-    const show = Boolean(state.appName) && !deploying && (running || isDeployed() === true);
+    // A redeploy in flight also holds this panel back: both scripts claim the
+    // game (see scriptrunner.go's claim), so a teardown started now would just
+    // fail with "a run is already in progress".
+    const redeploying = isGameRunning("redeploy", state.appName);
+    const show = Boolean(state.appName) && !deploying && !redeploying && (running || isDeployed() === true);
     el.style.display = show ? "" : "none";
     if (!show) return;
 

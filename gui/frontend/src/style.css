@@ -101,6 +101,11 @@ body {
   padding-bottom: 0.75rem;
 }
 
+/* Keeps Re-check clear of the last check row. */
+.prereq-list > button {
+  margin-top: 0.6rem;
+}
+
 /* --- layout: sidebar + scrollable main content -------------------------- */
 
 .app-layout {
@@ -304,6 +309,45 @@ body {
   color: var(--accent);
   font-size: 0.7em;
   vertical-align: middle;
+}
+
+/* --- "new code available" banner + redeploy panel ------------------------ */
+
+.code-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin: 0 0 0.75rem;
+  padding: 0.6rem 0.8rem;
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  background: rgba(var(--accent-rgb), 0.12);
+  font-size: 0.88rem;
+}
+
+/* Destructive SQL the new commits add — the one thing worth stopping for. */
+.sql-warning {
+  margin: 0.5rem 0 0.75rem;
+  padding: 0.6rem 0.8rem;
+  border: 1px solid var(--fail);
+  border-radius: 8px;
+  background: rgba(var(--fail-rgb), 0.1);
+  font-size: 0.85rem;
+}
+
+.sql-warning-heading {
+  font-weight: 600;
+  margin-bottom: 0.3rem;
+}
+
+.sql-warning ul {
+  margin: 0 0 0.5rem;
+  padding-left: 1.2rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.78rem;
+  overflow-wrap: anywhere;
 }
 
 /* --- tabs ---------------------------------------------------------------- */
@@ -650,6 +694,22 @@ button.secondary:hover:not(:disabled) {
   color: var(--text-muted);
   white-space: nowrap;
   align-self: center;
+}
+
+.spend-badge {
+  all: unset;
+  box-sizing: border-box;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+  cursor: pointer;
+  padding: 0.2rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.spend-badge:hover:not(:disabled) {
+  color: var(--text);
 }
 
 /* Spans both columns of the extra-keys grid, above the individual fields. */

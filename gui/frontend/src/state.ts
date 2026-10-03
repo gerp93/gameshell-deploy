@@ -1,4 +1,4 @@
-import type { DeployConf, LogLine, PreflightResult, StatusResult } from "./api";
+import type { DeployConf, LogLine, PreflightResult, RedeployCheck, StatusResult } from "./api";
 
 // Plain module-level state — no state-management library, this app only
 // has a handful of panels.
@@ -19,7 +19,22 @@ export const state = {
   // true while chooseApp() is loading a newly-selected game's deploy.conf +
   // DO status — both hit disk/doctl and can take a couple of seconds.
   loadingGame: false,
+  // Whether the selected game's branch has code that isn't deployed yet (see
+  // codeCheck.ts). null until a check has been started for the selected game.
+  codeCheck: null as CodeCheckState | null,
 };
+
+// The latest "is there new code to redeploy?" answer for one game. result
+// keeps the previous answer while a re-check is in flight, so a banner doesn't
+// flicker away and back on every poll.
+export interface CodeCheckState {
+  appName: string;
+  checking: boolean;
+  result: RedeployCheck | null;
+  error: string;
+  // Date.now() when the last check finished; 0 if none has.
+  checkedAt: number;
+}
 
 // --- per-game run tracking -------------------------------------------------
 //
@@ -32,7 +47,7 @@ export const state = {
 // just re-points at whichever game's GameRun the sidebar has selected (see
 // logPane.ts).
 
-export type RunKind = "create" | "delete";
+export type RunKind = "create" | "delete" | "redeploy";
 
 export interface GameRun {
   running: boolean;
@@ -46,7 +61,7 @@ export interface GameRun {
 }
 
 const MAX_LOG_LINES = 4000;
-const gameRuns: Record<RunKind, Map<string, GameRun>> = { create: new Map(), delete: new Map() };
+const gameRuns: Record<RunKind, Map<string, GameRun>> = { create: new Map(), delete: new Map(), redeploy: new Map() };
 
 export function getGameRun(kind: RunKind, appName: string): GameRun {
   const map = gameRuns[kind];
@@ -110,6 +125,7 @@ export function runningKind(appName: string): RunKind | null {
   if (!appName) return null;
   if (getGameRun("create", appName).running) return "create";
   if (getGameRun("delete", appName).running) return "delete";
+  if (getGameRun("redeploy", appName).running) return "redeploy";
   return null;
 }
 

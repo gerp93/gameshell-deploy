@@ -17,10 +17,10 @@ Go/JS/etc. code here besides `gui/` (see below) — just bash scripts, a
 couple of templates, and docs.
 
 **Exception:** `gui/` contains a self-contained Wails (Go) desktop app that wraps
-`create.sh`/`delete.sh` for operators who prefer a GUI to the CLI — it is the one
+`create.sh`/`delete.sh`/`redeploy.sh` for operators who prefer a GUI to the CLI — it is the one
 place in this repo with non-bash code, has its own `go.mod`, and follows normal
 Go/Wails conventions rather than the bash conventions below. It only adds
-non-interactive flags to `create.sh`/`delete.sh` (see their headers); it never
+non-interactive flags to `create.sh`/`delete.sh`/`redeploy.sh` (see their headers; `redeploy.sh --check` is the query-only mode the GUI uses to nudge the operator when the branch has undeployed code, parsed from its `REDEPLOY_CHECK` lines); it never
 hardcodes game-specific values, and it drives the scripts the same way the CLI
 does — by app name, reading/writing `games/APP_NAME/deploy.conf`.
 
@@ -30,7 +30,7 @@ encrypts database backups at rest.
 
 ## The process/config/data split (must not blur)
 
-- **Process** (this repo, generic): `create.sh`, `delete.sh`,
+- **Process** (this repo, generic): `create.sh`, `delete.sh`, `redeploy.sh`,
   `templates/setup.sh`, `templates/spec.yaml`. Fully generic — **no game
   names, no game-specific values, ever**. If you catch yourself hardcoding a
   game's name, env prefix, or port in these files, that value belongs in
@@ -53,7 +53,7 @@ encrypts database backups at rest.
   `.gitignore`) — encrypted dumps included, not just decrypted `*.sql` —
   because backups are operator-local working data, not shared tooling.
   Never commit a decrypted `*.sql` file regardless. The GUI also writes
-  `games/APP_NAME/last-create.log` / `last-delete.log` (git-ignored) so a
+  `games/APP_NAME/last-create.log` / `last-delete.log` / `last-redeploy.log` (git-ignored) so a
   failed deploy that leaves a droplet doesn't lose the script output when
   the Action tab flips to Teardown.
 - **Secrets** come from the operator's environment, never from a file:
@@ -156,6 +156,8 @@ cloud resources to clean up.
   trailer before it's trusted and GPG-encrypted. Keep all five checks if you
   touch that block — each one catches a different failure mode (SSH hiccup,
   disk full, truncated transfer, wrong DB name, mid-dump crash).
+  `redeploy.sh` carries its own copy of this block (the scripts share no
+  code), so a change to the checks or the dump command belongs in both.
 - `mariadb-dump` output is piped through `sed -e 's/DEFINER[ ]*=[ ]*[^*]*\*/\*/'`
   to strip `DEFINER=` clauses before the file is trusted — restoring a dump
   with a stale `DEFINER` onto a fresh droplet (no matching MariaDB user yet)

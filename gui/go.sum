@@ -6,8 +6,6 @@ github.com/danieljoos/wincred v1.2.3 h1:v7dZC2x32Ut3nEfRH+vhoZGvN72+dQ/snVXo/vMF
 github.com/danieljoos/wincred v1.2.3/go.mod h1:6qqX0WNrS4RzPZ1tnroDzq9kY3fu1KwE7MRLQK4X0bs=
 github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c=
 github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
-github.com/gerp93/KVG_Standards/packages/go/kvgupdate v0.0.0-20260807143939-e8d476dfc760 h1:b7nODcMAJS5QYJW8QK6bSNWsjLVgtAQp6ItJdtCLF6U=
-github.com/gerp93/KVG_Standards/packages/go/kvgupdate v0.0.0-20260807143939-e8d476dfc760/go.mod h1:nsD/b8KAbu9XuGL8uVU0mVr4jrtPaU+LX8zgxUsufRQ=
 github.com/gerp93/KVG_Standards/packages/go/kvgupdate v0.0.0-20260904061013-973658b42794 h1:+2mFcdZ3NWYvs4bZegBWo+FcZDfJXoaEBEoIpfXaJHo=
 github.com/gerp93/KVG_Standards/packages/go/kvgupdate v0.0.0-20260904061013-973658b42794/go.mod h1:nsD/b8KAbu9XuGL8uVU0mVr4jrtPaU+LX8zgxUsufRQ=
 github.com/go-ole/go-ole v1.3.0 h1:Dt6ye7+vXGIKZ7Xtk4s6/xVdGDQynvom7xCFEdWr6uE=

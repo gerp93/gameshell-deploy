@@ -18,10 +18,10 @@ import { appendGameRunLine, getGameRun, notify } from "./state";
 
 type LineListener = (line: LogLine) => void;
 type ExitListener = (info: ExitInfo) => void;
-type Kind = "create" | "delete";
+type Kind = "create" | "delete" | "redeploy";
 
-const lineListeners: Record<Kind, Set<LineListener>> = { create: new Set(), delete: new Set() };
-const exitListeners: Record<Kind, Set<ExitListener>> = { create: new Set(), delete: new Set() };
+const lineListeners: Record<Kind, Set<LineListener>> = { create: new Set(), delete: new Set(), redeploy: new Set() };
+const exitListeners: Record<Kind, Set<ExitListener>> = { create: new Set(), delete: new Set(), redeploy: new Set() };
 
 export function onLine(kind: Kind, fn: LineListener): void {
   lineListeners[kind].add(fn);
@@ -31,7 +31,11 @@ export function onFinish(kind: Kind, fn: ExitListener): void {
   exitListeners[kind].add(fn);
 }
 
-function wireKind(logEvent: "create:log" | "delete:log", exitEvent: "create:exit" | "delete:exit", kind: Kind) {
+function wireKind(
+  logEvent: "create:log" | "delete:log" | "redeploy:log",
+  exitEvent: "create:exit" | "delete:exit" | "redeploy:exit",
+  kind: Kind,
+) {
   onLog(logEvent, (line) => {
     getGameRun(kind, line.appName).running = true;
     appendGameRunLine(kind, line);
@@ -51,4 +55,5 @@ function wireKind(logEvent: "create:log" | "delete:log", exitEvent: "create:exit
 export function initRunTracking(): void {
   wireKind("create:log", "create:exit", "create");
   wireKind("delete:log", "delete:exit", "delete");
+  wireKind("redeploy:log", "redeploy:exit", "redeploy");
 }

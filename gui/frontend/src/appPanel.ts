@@ -1,4 +1,5 @@
 import { checkStatus, getOpsDir, listGames, loadDeployConf, loadSettings, selectApp, type StatusResult } from "./api";
+import { refreshCodeCheck } from "./codeCheck";
 import { state, notify, runningKind } from "./state";
 
 // Re-checks Digital Ocean status for the currently selected game — exported
@@ -7,9 +8,14 @@ import { state, notify, runningKind } from "./state";
 export async function refreshStatus(): Promise<void> {
   if (!state.deployConfFound || !state.deployConf?.appName) {
     state.status = null;
+    state.codeCheck = null;
     return;
   }
   state.status = await checkStatus(state.deployConf.appName);
+  // Whether there's undeployed code depends on whether an app exists, so
+  // every status refresh (game selected, run finished) re-asks. Not awaited:
+  // it makes network calls and shouldn't hold up showing the game.
+  void refreshCodeCheck();
 }
 
 // Re-checks status a few seconds after a run finishes. Both panels write an
@@ -162,7 +168,7 @@ export function createAppPanel(): { el: HTMLElement; render: () => void } {
         const dot = document.createElement("span");
         dot.className = "game-item-running";
         dot.textContent = "●";
-        dot.title = kind === "create" ? "Deploying…" : "Tearing down…";
+        dot.title = kind === "create" ? "Deploying…" : kind === "redeploy" ? "Redeploying…" : "Tearing down…";
         item.appendChild(dot);
       }
       item.onclick = () => void chooseApp(name);

@@ -381,8 +381,12 @@ func secretCheckSpec(opsDir, appName, envName string) (string, error) {
 
 // --- preflight -------------------------------------------------------------
 
+// RunPreflightChecks verifies the tools are installed and, for every game under
+// games/, that its git repos are reachable. With no ops dir (see GetOpsDir) the
+// repo checks are skipped.
 func (a *App) RunPreflightChecks() preflight.Result {
-	return preflight.RunChecks()
+	opsDir, _ := a.GetOpsDir()
+	return preflight.RunChecks(opsDir)
 }
 
 // --- deploy / teardown -----------------------------------------------------
@@ -440,6 +444,12 @@ func (a *App) CheckStatus(appName string) (scriptrunner.StatusResult, error) {
 	return scriptrunner.CheckStatus(appName)
 }
 
+// GetBalance returns the Digital Ocean account's month-to-date usage, for the
+// header's spend readout.
+func (a *App) GetBalance() (scriptrunner.BalanceResult, error) {
+	return scriptrunner.GetBalance()
+}
+
 // RunCreate starts create.sh in the background and returns immediately;
 // progress and the final result arrive as "create:log" / "create:exit"
 // events (see scriptrunner.RunCreate).
@@ -456,6 +466,22 @@ func (a *App) RunDelete(req scriptrunner.DeleteRequest) {
 	go func() {
 		_ = scriptrunner.RunDelete(req, wailsEmitter{ctx: a.ctx})
 	}()
+}
+
+// RunRedeploy starts redeploy.sh in the background and returns immediately;
+// progress and the final result arrive as "redeploy:log" / "redeploy:exit"
+// events (see scriptrunner.RunRedeploy).
+func (a *App) RunRedeploy(req scriptrunner.RedeployRequest) {
+	go func() {
+		_ = scriptrunner.RunRedeploy(req, wailsEmitter{ctx: a.ctx})
+	}()
+}
+
+// CheckRedeploy reports whether appName (the games/ directory name) has code on
+// its branch that isn't deployed yet, plus any destructive SQL in it, so the
+// GUI can offer a redeploy proactively.
+func (a *App) CheckRedeploy(opsDir, appName string) (scriptrunner.RedeployCheck, error) {
+	return scriptrunner.CheckRedeploy(opsDir, appName)
 }
 
 // CancelRun kills the running script for appName, if any. It does not clean

@@ -5,13 +5,18 @@ import { createGameHeader } from "./gameHeader";
 import { createConfigForm } from "./configForm";
 import { createDeployPanel } from "./deployPanel";
 import { createTeardownPanel } from "./teardownPanel";
+import { createRedeployPanel } from "./redeployPanel";
+import { createCodeBanner } from "./codeBanner";
+import { startCodeCheckPolling } from "./codeCheck";
 import { createTabs } from "./tabs";
 import { createThemeSwitcher } from "./themeSwitcher";
 import { createSpinner } from "./spinner";
+import { createSpendBadge } from "./spendBadge";
 import { initRunTracking } from "./runTracking";
 import { state, subscribe, isDeployed, runningKind, hasFailedExit } from "./state";
 
 initRunTracking();
+startCodeCheckPolling();
 
 const app = document.getElementById("app")!;
 
@@ -25,7 +30,7 @@ const themeSwitcher = createThemeSwitcher();
 const openFolderButton = document.createElement("button");
 openFolderButton.type = "button";
 openFolderButton.className = "secondary";
-openFolderButton.textContent = "Open repo folder";
+openFolderButton.textContent = "Open data folder";
 openFolderButton.disabled = true;
 openFolderButton.onclick = () => void openOpsDir(state.opsDir);
 
@@ -77,7 +82,7 @@ void getVersion()
     // Purely informational; an unreadable version just leaves the label blank.
   });
 
-headerActions.append(themeSwitcher, openFolderButton, versionLabel, updateButton);
+headerActions.append(createSpendBadge(), themeSwitcher, openFolderButton, versionLabel, updateButton);
 header.appendChild(headerActions);
 
 const preflight = createPreflightPanel();
@@ -94,9 +99,13 @@ const gameHeader = createGameHeader();
 const configForm = createConfigForm();
 const deploy = createDeployPanel();
 const teardown = createTeardownPanel();
+const redeploy = createRedeployPanel();
+const codeBanner = createCodeBanner();
 
+// Redeploy sits above Teardown: for a deployed game the common action is
+// shipping new code, the rare one is deleting everything.
 const actionTabContent = document.createElement("div");
-actionTabContent.append(deploy.el, teardown.el);
+actionTabContent.append(deploy.el, redeploy.el, teardown.el);
 
 const tabs = createTabs(
   [
@@ -108,10 +117,12 @@ const tabs = createTabs(
         const kind = runningKind(state.appName);
         if (kind === "create") return "Deploying…";
         if (kind === "delete") return "Tearing down…";
+        if (kind === "redeploy") return "Redeploying…";
         // Failed create with leftover resources: stay on Deploy so the log
         // is what you see, not an empty Teardown form.
         if (hasFailedExit("create", state.appName)) return "Deploy";
-        return isDeployed() === true ? "Teardown" : "Deploy";
+        // A deployed game offers both Redeploy and Teardown on this tab.
+        return isDeployed() === true ? "Manage" : "Deploy";
       },
       el: actionTabContent,
       visible: () => state.deployConfFound,
@@ -128,7 +139,7 @@ const loadingSpinner = createSpinner("Loading game…");
 loadingSpinner.style.display = "none";
 
 tabs.el.style.display = "none";
-main.append(gameHeader.el, loadingSpinner, tabs.el);
+main.append(gameHeader.el, codeBanner.el, loadingSpinner, tabs.el);
 layout.append(sidebar.el, main);
 app.append(header, preflight.el, layout);
 
@@ -138,11 +149,13 @@ subscribe(() => {
   tabs.el.style.display = state.appName && !state.loadingGame ? "" : "none";
   sidebar.render();
   gameHeader.render();
+  codeBanner.render();
   tabs.render();
   configForm.render();
   // deploy/teardown each re-point their log pane at state.appName on every
   // render (see logPane.showGame) — a game deploying in the background
   // keeps streaming into its own history even while another game is shown.
   deploy.render();
+  redeploy.render();
   teardown.render();
 });

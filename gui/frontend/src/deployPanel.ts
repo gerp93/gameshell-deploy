@@ -427,16 +427,46 @@ export function createDeployPanel(): { el: HTMLElement; render: () => void } {
       }
     }
 
+    let restoring = "unknown";
+    try {
+      restoring = (await hasBackups(state.opsDir, appName)) ? "yes — latest backup" : "no backups found";
+    } catch {
+      // Informational only; leave it as "unknown".
+    }
+
     // Mark this game as running immediately (before the first log line
     // arrives) so the button/tab reflect it right away, and record the
     // non-secret settings it's running with for the progress view.
     clearGameRun("create", appName);
+    // A new deploy makes the last teardown's output irrelevant. Clearing it
+    // here, rather than only when the deploy finishes (below), means it can't
+    // linger under the new deploy's log just because the operator had another
+    // game selected when it finished. A failed deploy still keeps its own log.
+    clearGameRun("delete", appName);
     const run = getGameRun("create", appName);
     run.running = true;
+    // Everything the run was launched with: the deploy.conf values, the
+    // choices made on this tab, and whether each secret was filled in (never
+    // its value) — so a run in progress shows exactly what it's running with.
+    const conf = state.deployConf;
+    const setMark = (value: string) => (value ? "✓ set" : "✗ not set");
     run.params = [
+      ["App name", conf?.appName || appName],
+      ["Git repo", conf?.gitRepo || "—"],
+      ["Git branch", conf?.gitBranch || "repo default"],
+      ...(conf?.gitUpstream ? [["Upstream", conf.gitUpstream] as [string, string]] : []),
+      ["Env var prefix", conf?.envVarPrefix || "—"],
+      ["Database", conf?.dbName || "—"],
+      ["HTTP port", conf?.httpPort || "—"],
+      ["Droplet image", conf?.dropletImage || "default"],
       ["SSH key", sshKeyName],
       ["Region", regionSelect.value],
       ["Price tier", tierInputs.find((i) => i.checked)?.parentElement?.textContent?.trim() ?? tier],
+      ["Restore backup", restoring],
+      ["DEPLOY_SQL_USER", setMark(sqlUser)],
+      ["DEPLOY_SQL_PASSWORD", setMark(sqlPassword)],
+      ["GPG_PASSPHRASE", setMark(gpgPassphrase)],
+      ...extraEnv.map(({ key, value }) => [key, setMark(value)] as [string, string]),
     ];
     deployButton.disabled = true;
 
@@ -674,6 +704,9 @@ export function createDeployPanel(): { el: HTMLElement; render: () => void } {
     // its own run.
     const running = isGameRunning("create", state.appName);
     const deleting = isGameRunning("delete", state.appName);
+    // The redeploy panel owns the Action tab while one is in flight — without
+    // this, a game with a leftover create log would show that old log above it.
+    const redeploying = isGameRunning("redeploy", state.appName);
     const deployed = isDeployed() === true;
     const failedCreate = hasFailedExit("create", state.appName);
     // Keep this panel (and its log) visible after a create finishes —
@@ -681,6 +714,7 @@ export function createDeployPanel(): { el: HTMLElement; render: () => void } {
     const show =
       Boolean(state.appName) &&
       !deleting &&
+      !redeploying &&
       (running || failedCreate || hasCreateLog(state.appName) || !deployed);
     el.style.display = show ? "" : "none";
     if (!show) return;

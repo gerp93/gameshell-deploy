@@ -42,7 +42,12 @@ binary executable first: `chmod +x gameshell-deploy-gui`.
 - Go 1.25+, Node 18+, and the [Wails CLI](https://wails.io/docs/gettingstarted/installation)
   (`go install github.com/wailsapp/wails/v2/cmd/wails@latest`).
 - Everything `create.sh`/`delete.sh` themselves need: `doctl` (authenticated),
-  `gpg`, `ssh`/`scp`. The app's Preflight panel checks for these at startup.
+  `gpg`, `ssh`/`scp`, `git`. The app's Preflight panel checks for these at startup,
+  and also probes each game's `GIT_REPO`/`GIT_UPSTREAM` (and `GIT_BRANCH`) with the
+  same `git ls-remote` create.sh uses, so an unreachable repo or typo'd branch shows
+  up before a deploy.
+  The header's "DO this month" readout (`doctl balance get`) is account-wide and
+  needs a token with billing access; without it the readout just shows n/a.
 - **On Windows**: [WSL](https://learn.microsoft.com/windows/wsl/install) with
   `doctl`/`gpg`/`ssh` installed inside it — the app shells every script
   invocation through `wsl.exe`.
@@ -81,6 +86,29 @@ This only regenerates the vendored block below the marker comment in
 and is never touched. See KVG_Standards'
 [themes-versioning.md](https://github.com/gerp93/KVG_Standards/blob/main/themes-versioning.md).
 
+## Redeploying and the "new code available" notice
+
+For a deployed game the Action tab is labelled **Manage** and offers
+**Redeploy** (above Teardown). It runs `redeploy.sh`: sync the fork, back up
+the live database, then have App Platform build and roll out the latest commit
+of the branch — the database droplet is never touched. Redeploying doesn't
+need new code; the panel works any time the game has a deployed app.
+
+The app also checks proactively. When a game is selected, every 10 minutes,
+and when the window regains focus, it runs `redeploy.sh APP_NAME --check`
+(read-only: a `doctl apps get` plus a `git ls-remote`, and a fetch only when the
+branch has moved). If the branch has commits that aren't deployed, a banner
+appears above the tabs ("New code available on main: 3 new commits…") with a
+**Review & redeploy** button; **Dismiss** hides it until an even newer commit.
+Only the selected game is checked, not every game in the sidebar.
+
+If those new commits add destructive SQL (`DROP`, `DELETE`, `UPDATE`,
+`TRUNCATE`, `MODIFY`/`CHANGE`), the panel lists the lines and requires ticking
+"I've reviewed these SQL changes" before Redeploy enables — the GUI always runs
+the script with `--yes`, so this is where that warning is answered. As with
+Deploy and Teardown, the run's settings (repo, branch, commit range, backup,
+SSH key, secrets as ✓ set / ✗ not set…) are shown above the log.
+
 ## Self-update
 
 Wired via KVG_Standards'
@@ -96,7 +124,8 @@ build time, `CheckForUpdate` will always report "up to date."
 
 - `platform/` — OS-specific command building (native on macOS/Linux, via
   `wsl.exe` on Windows); everything else in this app is OS-agnostic.
-- `scriptrunner/` — invokes `create.sh`/`delete.sh` and streams their output.
+- `scriptrunner/` — invokes `create.sh`/`delete.sh`/`redeploy.sh` and streams
+  their output; `redeploycheck.go` runs `redeploy.sh --check` and parses it.
 - `deployconf/` — reads/writes a game's `games/APP_NAME/deploy.conf` without
   disturbing its comments.
 - `preflight/` — checks doctl/gpg/ssh (and WSL, on Windows) are present.

@@ -87,6 +87,14 @@ export interface UpdateInfo {
   version: string;
 }
 
+// Month-to-date usage for the whole DO account (amounts are DO's decimal
+// strings, USD). generatedAt is when DO last computed it, not "now".
+export interface BalanceResult {
+  monthToDateUsage: string;
+  accountBalance: string;
+  generatedAt: string;
+}
+
 export interface TierOption {
   number: number;
   slug: string;
@@ -136,6 +144,29 @@ export interface DeleteRequest {
   gpgPassphrase: string;
 }
 
+export interface RedeployRequest {
+  opsDir: string;
+  appName: string;
+  backup: "yes" | "no" | "";
+  sshKeyName: string;
+  gpgPassphrase: string;
+  forceRebuild: boolean;
+}
+
+// What `redeploy.sh --check` reports: whether the branch has code newer than
+// what's deployed. "behind" means there's something new to ship; a redeploy is
+// allowed in every state. commits is -1 when it couldn't be counted.
+export interface RedeployCheck {
+  state: "current" | "behind" | "unknown" | "no-app";
+  deployed: string;
+  latest: string;
+  commits: number;
+  branch: string;
+  note: string;
+  // "file: line" for each destructive SQL line the new commits add.
+  destructiveSql: string[];
+}
+
 export const loadSettings = (): Promise<Settings> => Backend.LoadSettings();
 export const setRememberSecrets = (remember: boolean): Promise<void> => Backend.SetRememberSecrets(remember);
 export const loadSecrets = (extraNames: string[]): Promise<LoadedSecrets> =>
@@ -180,10 +211,14 @@ export const listAvailableTiers = (opsDir: string, appName: string, region: stri
 export const listAvailableRegions = (opsDir: string, appName: string): Promise<RegionOption[]> =>
   Backend.ListAvailableRegions(opsDir, appName);
 export const openURL = (url: string): Promise<void> => Backend.OpenURL(url);
+export const getBalance = (): Promise<BalanceResult> => Backend.GetBalance();
 export const checkStatus = (appName: string): Promise<StatusResult> => Backend.CheckStatus(appName);
 
 export const runCreate = (req: CreateRequest): Promise<void> => Backend.RunCreate(req as never);
 export const runDelete = (req: DeleteRequest): Promise<void> => Backend.RunDelete(req as never);
+export const runRedeploy = (req: RedeployRequest): Promise<void> => Backend.RunRedeploy(req as never);
+export const checkRedeploy = (opsDir: string, appName: string): Promise<RedeployCheck> =>
+  Backend.CheckRedeploy(opsDir, appName) as Promise<RedeployCheck>;
 export const cancelRun = (appName: string): Promise<boolean> => Backend.CancelRun(appName);
 
 // See app.go's CheckForUpdate/ApplyUpdate — this path is not yet verified
@@ -191,10 +226,10 @@ export const cancelRun = (appName: string): Promise<boolean> => Backend.CancelRu
 export const checkForUpdate = (): Promise<UpdateInfo> => Backend.CheckForUpdate();
 export const applyUpdate = (): Promise<void> => Backend.ApplyUpdate();
 
-export function onLog(event: "create:log" | "delete:log", handler: (line: LogLine) => void): void {
+export function onLog(event: "create:log" | "delete:log" | "redeploy:log", handler: (line: LogLine) => void): void {
   EventsOn(event, handler);
 }
 
-export function onExit(event: "create:exit" | "delete:exit", handler: (info: ExitInfo) => void): void {
+export function onExit(event: "create:exit" | "delete:exit" | "redeploy:exit", handler: (info: ExitInfo) => void): void {
   EventsOn(event, handler);
 }
