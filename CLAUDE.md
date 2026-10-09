@@ -38,8 +38,9 @@ encrypts database backups at rest.
 - **Config** (this repo, per-game, tracked): `games/APP_NAME/deploy.conf`,
   copied from [deploy.conf.template](deploy.conf.template) — `APP_NAME`,
   `ENV_VAR_PREFIX`, `DB_NAME`, `HTTP_PORT`, `GIT_REPO`, optional `GIT_UPSTREAM`/
-  `GIT_BRANCH`/`EXTRA_ENV_VARS`/droplet overrides. Only non-secret values live in
-  `deploy.conf`, so it's safe to commit. `EXTRA_ENV_VARS` is a space- or
+  `GIT_BRANCH`/`EXTRA_ENV_VARS`/droplet overrides, and `MAX_UPTIME_HOURS` (a
+  GUI-only reminder threshold; `create.sh` ignores it). Only non-secret values
+  live in `deploy.conf`, so it's safe to commit. `EXTRA_ENV_VARS` is a space- or
   comma-separated list of **names** (API keys, etc.) to copy from the
   operator's environment onto the DO app — never the values themselves. A
   leading `+` concatenates `ENV_VAR_PREFIX` (`+YT_API_KEY` with prefix

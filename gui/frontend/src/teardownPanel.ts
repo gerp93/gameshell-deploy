@@ -148,7 +148,7 @@ export function createTeardownPanel(): { el: HTMLElement; render: () => void } {
       // state for a few seconds (DO API eventual consistency). Only a
       // failure (partial/unknown state) needs a real re-check.
       if (info.code === 0) {
-        state.status = { dropletExists: false, appExists: false, appURL: "" };
+        state.status = { dropletExists: false, appExists: false, appURL: "", upSince: "" };
         // Whatever gets deployed next should open on Redeploy, not Teardown.
         state.manageMode = "redeploy";
         // A *successful* prior deploy's history is now stale — leaving it in

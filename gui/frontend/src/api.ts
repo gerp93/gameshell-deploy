@@ -45,6 +45,7 @@ export interface DeployConf {
   dropletImage: string;
   dropletSize: string;
   extraEnvVars: string;
+  maxUptimeHours: string;
   secretChecks: SecretCheckEntry[];
 }
 
@@ -88,6 +89,18 @@ export interface StatusResult {
   dropletExists: boolean;
   appExists: boolean;
   appURL: string;
+  // RFC 3339 time the game came up (see StatusResult in scriptrunner.go);
+  // "" when nothing is deployed.
+  upSince: string;
+}
+
+// One game's row from listGameStatuses — everything the sidebar needs about a
+// game without selecting it.
+export interface GameStatus {
+  game: string;
+  hasConf: boolean;
+  maxUptimeHours: number;
+  status: StatusResult;
 }
 
 export interface UpdateInfo {
@@ -221,6 +234,8 @@ export const listAvailableRegions = (opsDir: string, appName: string): Promise<R
 export const openURL = (url: string): Promise<void> => Backend.OpenURL(url);
 export const getBalance = (): Promise<BalanceResult> => Backend.GetBalance();
 export const checkStatus = (appName: string): Promise<StatusResult> => Backend.CheckStatus(appName);
+export const listGameStatuses = (opsDir: string, games: string[]): Promise<GameStatus[]> =>
+  Backend.ListGameStatuses(opsDir, games) as Promise<GameStatus[]>;
 
 export const runCreate = (req: CreateRequest): Promise<void> => Backend.RunCreate(req as never);
 export const runDelete = (req: DeleteRequest): Promise<void> => Backend.RunDelete(req as never);

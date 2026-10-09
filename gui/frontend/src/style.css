@@ -289,6 +289,15 @@ body {
   color: var(--ok);
 }
 
+.pill-busy {
+  background: rgba(var(--accent-rgb), 0.18);
+  color: var(--accent);
+}
+
+.game-item-tag-busy {
+  color: var(--accent);
+}
+
 .pill-not-deployed {
   background: rgba(var(--text-muted-rgb), 0.18);
   color: var(--text-muted);
@@ -333,6 +342,41 @@ body {
 
 .run-summary-params dd {
   margin: 0;
+}
+
+/* Second line of a sidebar entry: deployed / down / partial + uptime. On the
+   active (accent-colored) entry the colors would clash, so it inherits white;
+   the ⚠ prefix keeps over-limit and partial distinguishable there. */
+.game-item-tag {
+  margin-top: 0.1rem;
+  font-size: 0.72rem;
+  color: var(--text-muted);
+}
+
+.game-item-tag-up {
+  color: var(--ok);
+}
+
+.game-item-tag-over,
+.game-item-tag-partial {
+  color: var(--fail);
+  font-weight: 600;
+}
+
+.game-item.active .game-item-tag {
+  color: inherit;
+  opacity: 0.9;
+}
+
+/* "Up 3h 12m" beside the Deployed pill in the game header. */
+.game-uptime {
+  font-size: 0.82rem;
+  color: var(--text-muted);
+}
+
+.game-uptime-over {
+  color: var(--fail);
+  font-weight: 600;
 }
 
 .game-item-running {

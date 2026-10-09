@@ -47,6 +47,10 @@ type DeployConf struct {
 	// prefix TRACK_TIMELINE becomes TRACK_TIMELINE_YT_API_KEY). Commas are
 	// treated as separators, same as spaces.
 	ExtraEnvVars string `json:"extraEnvVars"`
+	// MaxUptimeHours is how many hours the game should stay deployed before
+	// the GUI flags it as over time (a reminder only — nothing is torn down).
+	// Blank means no limit. create.sh ignores it.
+	MaxUptimeHours string `json:"maxUptimeHours"`
 	// SecretChecks are the SECRET_CHECK_<NAME> lines, one per extra env var
 	// that has a pre-deploy check. Saved back as those same lines.
 	SecretChecks []SecretCheck `json:"secretChecks"`
@@ -69,6 +73,7 @@ var fields = []field{
 	{"DROPLET_IMAGE", func(c *DeployConf) *string { return &c.DropletImage }},
 	{"DROPLET_SIZE", func(c *DeployConf) *string { return &c.DropletSize }},
 	{"EXTRA_ENV_VARS", func(c *DeployConf) *string { return &c.ExtraEnvVars }},
+	{"MAX_UPTIME_HOURS", func(c *DeployConf) *string { return &c.MaxUptimeHours }},
 }
 
 func fieldByKey(key string) *field {
@@ -237,6 +242,16 @@ func Save(path string, conf DeployConf) error {
 	return os.WriteFile(path, []byte(strings.Join(out, "\n")+"\n"), 0o644)
 }
 
+// MaxUptime returns conf's MAX_UPTIME_HOURS as a number of hours, or 0 when it
+// is blank or not a positive whole number (no limit).
+func (c DeployConf) MaxUptime() int {
+	n, err := strconv.Atoi(strings.TrimSpace(c.MaxUptimeHours))
+	if err != nil || n < 1 {
+		return 0
+	}
+	return n
+}
+
 // checkName returns NAME for a SECRET_CHECK_<NAME> key.
 func checkName(key string) (string, bool) {
 	name := strings.TrimPrefix(key, secretCheckPrefix)
@@ -314,6 +329,11 @@ func Validate(conf DeployConf) []string {
 	}
 	if conf.GitRepo != "" && !gitRepoPattern.MatchString(conf.GitRepo) {
 		errs = append(errs, "GIT_REPO must look like owner/name")
+	}
+	if strings.TrimSpace(conf.MaxUptimeHours) != "" {
+		if n, err := strconv.Atoi(strings.TrimSpace(conf.MaxUptimeHours)); err != nil || n < 1 {
+			errs = append(errs, "MAX_UPTIME_HOURS must be a whole number of hours, 1 or more (or blank for no limit)")
+		}
 	}
 	for _, tok := range extraEnvTokens(conf.ExtraEnvVars) {
 		name, concatPrefix, ok := parseExtraEnvToken(tok)

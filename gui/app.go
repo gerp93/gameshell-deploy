@@ -444,6 +444,27 @@ func (a *App) CheckStatus(appName string) (scriptrunner.StatusResult, error) {
 	return scriptrunner.CheckStatus(appName)
 }
 
+// ListGameStatuses returns the Digital Ocean status of every listed game
+// (names from ListGames) for the sidebar, from one pair of doctl calls. Each
+// game's APP_NAME and MAX_UPTIME_HOURS come from its own deploy.conf; a game
+// without one is reported with HasConf false rather than failing the batch.
+func (a *App) ListGameStatuses(opsDir string, games []string) ([]scriptrunner.GameStatus, error) {
+	refs := make([]scriptrunner.GameRef, 0, len(games))
+	for _, game := range games {
+		ref := scriptrunner.GameRef{Game: game}
+		path := filepath.Join(gameConfigDir(opsDir, game), "deploy.conf")
+		if deployconf.Exists(path) {
+			if conf, err := deployconf.Load(path); err == nil && conf.AppName != "" {
+				ref.HasConf = true
+				ref.AppName = conf.AppName
+				ref.MaxUptimeHours = conf.MaxUptime()
+			}
+		}
+		refs = append(refs, ref)
+	}
+	return scriptrunner.ListGameStatuses(refs)
+}
+
 // GetBalance returns the Digital Ocean account's month-to-date usage, for the
 // header's spend readout.
 func (a *App) GetBalance() (scriptrunner.BalanceResult, error) {

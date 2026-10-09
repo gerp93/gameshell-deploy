@@ -381,7 +381,14 @@ export function createDeployPanel(): { el: HTMLElement; render: () => void } {
         // a few seconds (DO API eventual consistency), and we already know
         // create.sh just finished successfully.
         await refreshStatus();
-        state.status = { dropletExists: true, appExists: true, appURL: state.status?.appURL ?? "" };
+        state.status = {
+          dropletExists: true,
+          appExists: true,
+          appURL: state.status?.appURL ?? "",
+          // A fresh deploy starts the clock now; the reconcile a few seconds
+          // later replaces this with Digital Ocean's own creation time.
+          upSince: state.status?.upSince || new Date().toISOString(),
+        };
         // Whatever teardown history existed for this game was for a
         // deployment that no longer exists — a successful deploy makes it
         // stale, and leaving it in place is what made switching to
