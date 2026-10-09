@@ -64,3 +64,9 @@ GIT_BRANCH=
 DROPLET_REGION=nyc3
 DROPLET_IMAGE=centos-stream-9-x64
 DROPLET_SIZE=s-1vcpu-1gb-amd
+
+# Optional: how many hours this game should stay deployed. The GUI shows how
+# long it has been up and turns the tag red once it passes this, as a nudge to
+# tear it down — it is a reminder only and never tears anything down itself.
+# Whole hours, 1 or more; leave blank for no limit. create.sh ignores it.
+MAX_UPTIME_HOURS=

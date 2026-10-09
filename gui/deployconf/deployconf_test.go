@@ -161,3 +161,53 @@ func TestValidateChecksRejectsOrphansAndBadSpecs(t *testing.T) {
 		}
 	}
 }
+
+func TestMaxUptimeHoursRoundTripsAndValidates(t *testing.T) {
+	path := writeConf(t, "APP_NAME=g\nMAX_UPTIME_HOURS=4\n")
+	conf, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if conf.MaxUptimeHours != "4" || conf.MaxUptime() != 4 {
+		t.Fatalf("loaded %q / %d, want 4", conf.MaxUptimeHours, conf.MaxUptime())
+	}
+
+	conf.MaxUptimeHours = "6"
+	if err := Save(path, conf); err != nil {
+		t.Fatal(err)
+	}
+	data, _ := os.ReadFile(path)
+	if !strings.Contains(string(data), "MAX_UPTIME_HOURS=6\n") {
+		t.Fatalf("save did not rewrite the value:\n%s", data)
+	}
+
+	// Blank means no limit, and an absent key isn't appended for a blank value.
+	bare := writeConf(t, "APP_NAME=g\n")
+	conf = DeployConf{AppName: "g"}
+	if err := Save(bare, conf); err != nil {
+		t.Fatal(err)
+	}
+	data, _ = os.ReadFile(bare)
+	if strings.Contains(string(data), "MAX_UPTIME_HOURS") {
+		t.Fatalf("blank value should not be appended:\n%s", data)
+	}
+	if conf.MaxUptime() != 0 {
+		t.Fatal("blank should mean no limit")
+	}
+
+	for _, bad := range []string{"0", "-3", "2.5", "abc"} {
+		errs := Validate(DeployConf{AppName: "g", EnvVarPrefix: "G", DBName: "g", HTTPPort: "1", GitRepo: "o/n", MaxUptimeHours: bad})
+		found := false
+		for _, e := range errs {
+			if strings.Contains(e, "MAX_UPTIME_HOURS") {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("MAX_UPTIME_HOURS=%q should be rejected, got %v", bad, errs)
+		}
+		if (DeployConf{MaxUptimeHours: bad}).MaxUptime() != 0 {
+			t.Errorf("MaxUptime(%q) should be 0", bad)
+		}
+	}
+}

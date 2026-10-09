@@ -1,6 +1,7 @@
-import { checkStatus, getOpsDir, listGames, loadDeployConf, loadSettings, selectApp, type StatusResult } from "./api";
+import { checkStatus, getOpsDir, listGameStatuses, listGames, loadDeployConf, loadSettings, selectApp, type StatusResult } from "./api";
 import { refreshCodeCheck } from "./codeCheck";
 import { state, notify, runningKind } from "./state";
+import { tagForGame } from "./uptime";
 
 // Re-checks Digital Ocean status for the currently selected game — exported
 // so deployPanel/teardownPanel can call it once a run finishes, since a
@@ -16,6 +17,35 @@ export async function refreshStatus(): Promise<void> {
   // every status refresh (game selected, run finished) re-asks. Not awaited:
   // it makes network calls and shouldn't hold up showing the game.
   void refreshCodeCheck();
+}
+
+// Refreshes the sidebar tags: every game's Digital Ocean status from one pair
+// of doctl calls. Only the latest request's answer is applied, so a slow call
+// can't overwrite a newer one. A failure keeps the previous tags — the
+// Prerequisites panel is what reports a broken doctl.
+let statusRequest = 0;
+let statusesFetchedAt = 0;
+export async function refreshAllStatuses(): Promise<void> {
+  if (!state.opsDir || state.games.length === 0) {
+    state.gameStatuses = [];
+    return;
+  }
+  const request = ++statusRequest;
+  try {
+    const result = await listGameStatuses(state.opsDir, state.games);
+    if (request !== statusRequest) return;
+    state.gameStatuses = result;
+    statusesFetchedAt = Date.now();
+    notify();
+  } catch {
+    // keep what's showing
+  }
+}
+
+// True when the sidebar tags are older than maxAgeMs — lets a window-focus
+// refresh skip the doctl calls when nothing has had time to change.
+export function statusesStale(maxAgeMs: number): boolean {
+  return Date.now() - statusesFetchedAt > maxAgeMs;
 }
 
 // Re-checks status a few seconds after a run finishes. Both panels write an
@@ -99,6 +129,7 @@ export async function refreshGames(clearSelectionIfGone = false): Promise<void> 
     state.status = null;
   }
   notify();
+  void refreshAllStatuses();
 }
 
 // The sidebar: a list of games under games/, plus a small "add new" form at
@@ -159,7 +190,9 @@ export function createAppPanel(): { el: HTMLElement; render: () => void } {
       const item = document.createElement("button");
       item.type = "button";
       item.className = "game-item" + (name === state.appName ? " active" : "");
-      item.textContent = name;
+      const nameLine = document.createElement("div");
+      nameLine.textContent = name;
+      item.appendChild(nameLine);
       // Mark games with a script in flight, so a deploy left running in the
       // background is visible from the sidebar rather than only after
       // selecting that game again.
@@ -169,7 +202,16 @@ export function createAppPanel(): { el: HTMLElement; render: () => void } {
         dot.className = "game-item-running";
         dot.textContent = "●";
         dot.title = kind === "create" ? "Deploying…" : kind === "redeploy" ? "Redeploying…" : "Tearing down…";
-        item.appendChild(dot);
+        nameLine.appendChild(dot);
+      }
+      // Deployed / down / partial, with how long it's been up.
+      const tag = tagForGame(name);
+      if (tag.label) {
+        const tagLine = document.createElement("div");
+        tagLine.className = `game-item-tag game-item-tag-${tag.kind}`;
+        tagLine.textContent = (tag.kind === "over" || tag.kind === "partial" ? "⚠ " : "") + tag.label;
+        tagLine.title = tag.title;
+        item.appendChild(tagLine);
       }
       item.onclick = () => void chooseApp(name);
       list.appendChild(item);

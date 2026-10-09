@@ -1,6 +1,7 @@
 import { deleteGame, openURL, renameGame, selectApp } from "./api";
 import { refreshGames } from "./appPanel";
 import { state, notify, runningKind } from "./state";
+import { busyLabel, formatDuration, isOverLimit, maxUptimeHours, uptimeMs } from "./uptime";
 
 // The selected game's name + deployed/not-deployed pill, shown above the
 // Config/Deploy tabs. Also owns the "Delete game" action — it's the one
@@ -18,6 +19,9 @@ export function createGameHeader(): { el: HTMLElement; render: () => void } {
   titleRow.className = "game-header-title";
   const title = document.createElement("h2");
   const pill = document.createElement("span");
+  // "Up 3h 12m", or a warning once it's past MAX_UPTIME_HOURS.
+  const uptime = document.createElement("span");
+  uptime.className = "game-uptime";
 
   const deleteButton = document.createElement("button");
   deleteButton.type = "button";
@@ -85,7 +89,7 @@ export function createGameHeader(): { el: HTMLElement; render: () => void } {
   const renameError = document.createElement("div");
   renameError.className = "status-line";
 
-  titleRow.append(title, renameInput, pill, actions, renameActions);
+  titleRow.append(title, renameInput, pill, uptime, actions, renameActions);
 
   let renaming = false;
 
@@ -213,9 +217,31 @@ export function createGameHeader(): { el: HTMLElement; render: () => void } {
     applyRenameVisibility();
 
     title.textContent = state.appName;
-    const deployed = state.status ? state.status.dropletExists || state.status.appExists : null;
-    pill.className = deployed === null ? "" : deployed ? "pill pill-deployed" : "pill pill-not-deployed";
-    pill.textContent = deployed === null ? "" : deployed ? "Deployed" : "Not deployed";
+    // state.status still belongs to the previously selected game until
+    // loading finishes, so treat it as unknown until then.
+    const status = state.loadingGame ? null : state.status;
+    const deployed = status ? status.dropletExists || status.appExists : null;
+    // A script in flight outranks Digital Ocean's snapshot, which mid-deploy
+    // would say "Not deployed" about a game that is being deployed.
+    const running = runningKind(state.appName);
+    if (running) {
+      pill.className = "pill pill-busy";
+      pill.textContent = busyLabel(running);
+    } else {
+      pill.className = deployed === null ? "" : deployed ? "pill pill-deployed" : "pill pill-not-deployed";
+      pill.textContent = deployed === null ? "" : deployed ? "Deployed" : "Not deployed";
+    }
+
+    const up = uptimeMs(status);
+    const limit = maxUptimeHours(state.deployConf?.maxUptimeHours);
+    const over = isOverLimit(up, limit);
+    uptime.style.display = up === null ? "none" : "";
+    uptime.className = "game-uptime" + (over ? " game-uptime-over" : "");
+    uptime.textContent =
+      up === null ? "" : over ? `⚠ Up ${formatDuration(up)} — over your ${limit}h limit` : `Up ${formatDuration(up)}`;
+    uptime.title = over
+      ? "Still being billed. Tear it down in the Manage tab, or raise MAX_UPTIME_HOURS in Config."
+      : "Time since the droplet/app was created, per Digital Ocean. A redeploy doesn't reset it.";
 
     const appURL = state.status?.appURL ?? "";
     openAppButton.style.display = appURL ? "" : "none";

@@ -1,6 +1,6 @@
 import { openOpsDir, checkForUpdate, applyUpdate, getVersion } from "./api";
 import { createPreflightPanel } from "./preflightPanel";
-import { createAppPanel } from "./appPanel";
+import { createAppPanel, refreshAllStatuses, statusesStale } from "./appPanel";
 import { createGameHeader } from "./gameHeader";
 import { createConfigForm } from "./configForm";
 import { createDeployPanel } from "./deployPanel";
@@ -13,7 +13,7 @@ import { createTabs } from "./tabs";
 import { createThemeSwitcher } from "./themeSwitcher";
 import { createSpinner } from "./spinner";
 import { createSpendBadge } from "./spendBadge";
-import { initRunTracking } from "./runTracking";
+import { initRunTracking, onFinish } from "./runTracking";
 import { state, subscribe, isDeployed, runningKind, hasFailedExit } from "./state";
 
 initRunTracking();
@@ -144,6 +144,28 @@ tabs.el.style.display = "none";
 main.append(gameHeader.el, codeBanner.el, loadingSpinner, tabs.el);
 layout.append(sidebar.el, main);
 app.append(header, preflight.el, layout);
+
+// Uptimes are computed from timestamps, so they only need repainting, not
+// re-fetching, to keep counting up. Only the two places that show them are
+// redrawn — a full notify() would redraw every panel once a minute.
+setInterval(() => {
+  sidebar.render();
+  gameHeader.render();
+}, 60 * 1000);
+
+// Whether games are up or down changes outside this app too (a CLI deploy, a
+// teardown elsewhere), so re-ask periodically and when the window regains
+// focus after a while away.
+setInterval(() => void refreshAllStatuses(), 5 * 60 * 1000);
+window.addEventListener("focus", () => {
+  if (statusesStale(60 * 1000)) void refreshAllStatuses();
+});
+// A run that finishes while another game is selected changes that game's tag,
+// and the selected-game status doesn't cover it. Digital Ocean's list lags a
+// few seconds behind a create/delete, so wait before asking.
+for (const kind of ["create", "delete", "redeploy"] as const) {
+  onFinish(kind, () => setTimeout(() => void refreshAllStatuses(), 8000));
+}
 
 subscribe(() => {
   openFolderButton.disabled = !state.opsDir;

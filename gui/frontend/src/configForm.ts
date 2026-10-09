@@ -34,6 +34,7 @@ const emptyConf: DeployConf = {
   dropletImage: "",
   dropletSize: "",
   extraEnvVars: "",
+  maxUptimeHours: "",
   secretChecks: [],
 };
 
@@ -52,6 +53,7 @@ const fieldDefs: Array<{ key: TextFieldKey; label: string; required: boolean }> 
   { key: "dropletRegion", label: "DROPLET_REGION (optional)", required: false },
   { key: "dropletImage", label: "DROPLET_IMAGE (optional)", required: false },
   { key: "dropletSize", label: "DROPLET_SIZE (optional)", required: false },
+  { key: "maxUptimeHours", label: "MAX_UPTIME_HOURS (optional — warn when up longer)", required: false },
 ];
 
 export function createConfigForm(): { el: HTMLElement; render: () => void } {

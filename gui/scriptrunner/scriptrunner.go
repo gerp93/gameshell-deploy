@@ -328,40 +328,23 @@ type StatusResult struct {
 	// exists (or when DO hasn't assigned one yet — it can lag briefly right
 	// after a deploy).
 	AppURL string `json:"appURL"`
+	// UpSince is when the game started costing money, as an RFC 3339 UTC
+	// time: the earlier of the droplet's and the app's creation. Empty when
+	// neither exists. A redeploy doesn't reset it — DO keeps the app's
+	// original creation time — which is what "how long has this been up"
+	// should mean for billing.
+	UpSince string `json:"upSince"`
 }
 
 // CheckStatus looks up appName (deploy.conf's APP_NAME, not the games/
 // directory name) the same way create.sh/delete.sh do: droplet named
 // "APP_NAME-database", and an app whose spec name contains APP_NAME.
 func CheckStatus(appName string) (StatusResult, error) {
-	dropletOut, err := runDoctl("compute", "droplet", "list", "--format=Name", "--no-header")
+	snap, err := listResources()
 	if err != nil {
 		return StatusResult{}, err
 	}
-	// Same DefaultIngress,Spec.Name pairing create.sh reads the URL from
-	// after a deploy, so the GUI reports exactly what the script would.
-	appOut, err := runDoctl("apps", "list", "--format=DefaultIngress,Spec.Name", "--no-header")
-	if err != nil {
-		return StatusResult{}, err
-	}
-	result := StatusResult{
-		DropletExists: containsLine(dropletOut, appName+"-database"),
-	}
-	scanner := bufio.NewScanner(strings.NewReader(appOut))
-	for scanner.Scan() {
-		fields := strings.Fields(scanner.Text())
-		// A freshly-created app can appear with no ingress assigned yet, so
-		// the name is the last field rather than a fixed index.
-		if len(fields) == 0 || !strings.Contains(fields[len(fields)-1], appName) {
-			continue
-		}
-		result.AppExists = true
-		if len(fields) > 1 {
-			result.AppURL = fields[0]
-		}
-		break
-	}
-	return result, nil
+	return snap.statusFor(appName), nil
 }
 
 // BalanceResult is `doctl balance get`'s month-to-date picture. The amounts
@@ -440,16 +423,6 @@ func runDoctl(args ...string) (string, error) {
 		return "", err
 	}
 	return string(out), nil
-}
-
-func containsLine(output, substr string) bool {
-	scanner := bufio.NewScanner(strings.NewReader(output))
-	for scanner.Scan() {
-		if strings.Contains(scanner.Text(), substr) {
-			return true
-		}
-	}
-	return false
 }
 
 // Cancel kills the running script for appName, if any. It does not clean up

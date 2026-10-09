@@ -109,6 +109,27 @@ the script with `--yes`, so this is where that warning is answered. As with
 Deploy and Teardown, the run's settings (repo, branch, commit range, backup,
 SSH key, secrets as ✓ set / ✗ not set…) are shown above the log.
 
+## Status tags and uptime
+
+Each game in the sidebar has a second line: **deployed**, **down**, or
+**partial** (only the app or only the droplet exists — a deploy or teardown
+that didn't finish, still billed), plus how long it has been up
+(`deployed · 3h 12m`). While a script is running for the game, the tag and the
+pill in the game header say **deploying…**, **redeploying…**, or **tearing
+down…** instead of what Digital Ocean reports mid-job.
+
+The uptime comes from Digital Ocean, not from anything the GUI remembers: the
+earlier of the droplet's and the app's creation time (`doctl ... list -o json`).
+So it is right for a game deployed from the CLI or another computer, and a
+redeploy doesn't reset it. All games' tags come from one pair of `doctl` calls,
+refreshed at startup, every 5 minutes, when the window regains focus, and after
+a run finishes.
+
+Set `MAX_UPTIME_HOURS` in a game's `deploy.conf` (Config tab; blank = no limit)
+and the tag and header turn red with "over your Nh limit" once it has been up
+longer. It is a reminder only — the GUI never tears anything down, and it can
+only nudge you while it is open.
+
 ## Self-update
 
 Wired via KVG_Standards'

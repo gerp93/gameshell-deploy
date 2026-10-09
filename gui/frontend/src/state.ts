@@ -1,4 +1,4 @@
-import type { DeployConf, LogLine, PreflightResult, RedeployCheck, StatusResult } from "./api";
+import type { DeployConf, GameStatus, LogLine, PreflightResult, RedeployCheck, StatusResult } from "./api";
 
 // Plain module-level state — no state-management library, this app only
 // has a handful of panels.
@@ -14,6 +14,10 @@ export const state = {
   deployConf: null as DeployConf | null,
   preflight: null as PreflightResult | null,
   status: null as StatusResult | null,
+  // Every game's Digital Ocean status, for the sidebar tags (see
+  // appPanel.refreshAllStatuses). The selected game's tag uses `status`
+  // above instead, which a deploy or teardown updates immediately.
+  gameStatuses: [] as GameStatus[],
   activeTab: "action" as "config" | "action",
   prereqExpanded: false,
   // true while chooseApp() is loading a newly-selected game's deploy.conf +
