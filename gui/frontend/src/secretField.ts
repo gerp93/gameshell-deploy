@@ -167,6 +167,12 @@ export function createSecretField(
 
   function selectSource(source: "env" | "keyring") {
     input.value = source === "env" ? lastEnvValue : lastKeyringValue;
+    manuallyTyped = false;
+    // Typing may have narrowed the choices to the sources that have a value;
+    // the usual rule is to show the choice only when the two disagree.
+    envOption.hidden = false;
+    keyringOption.hidden = false;
+    radioGroup.hidden = !(lastEnvValue && lastKeyringValue && lastEnvValue !== lastKeyringValue);
     clearCheckResult();
     hint.textContent =
       source === "env"
@@ -190,7 +196,15 @@ export function createSecretField(
   input.oninput = () => {
     manuallyTyped = true;
     clearCheckResult();
-    radioGroup.hidden = true;
+    // Typing overrides the pre-filled value, but must not make the saved one
+    // unreachable: keep a way back to each source that has a value. (Hiding
+    // the choice here is how a keychain value that was still saved could no
+    // longer be selected.)
+    envOption.hidden = !lastEnvValue;
+    keyringOption.hidden = !lastKeyringValue;
+    envRadio.checked = false;
+    keyringRadio.checked = false;
+    radioGroup.hidden = !(lastEnvValue || lastKeyringValue);
     hint.textContent = input.value
       ? 'Typed here — will be saved to the OS keychain if "Remember secrets" is checked.'
       : "";
@@ -225,6 +239,8 @@ export function createSecretField(
     lastKeyringValue = "";
     manuallyTyped = false;
     radioGroup.hidden = true;
+    envOption.hidden = false;
+    keyringOption.hidden = false;
     hint.textContent = "";
     clearCheckResult();
   }
