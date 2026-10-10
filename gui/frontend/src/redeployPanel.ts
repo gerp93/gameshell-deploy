@@ -6,6 +6,7 @@ import { currentCodeCheck, refreshCodeCheck } from "./codeCheck";
 import { state, preflightPassed, isGameRunning, getGameRun, clearGameRun, manageMode, notify } from "./state";
 import { createRunSummary } from "./runSummary";
 import { createSecretField } from "./secretField";
+import { createRememberCheckbox } from "./rememberCheckbox";
 
 // Ships the latest commit of the branch to the running app, leaving the
 // database droplet alone (see redeploy.sh). Offered whenever the game has a
@@ -150,6 +151,8 @@ export function createRedeployPanel(): { el: HTMLElement; render: () => void } {
   const gpgMismatchWarning = document.createElement("div");
   gpgMismatchWarning.className = "status-line";
 
+  const remember = createRememberCheckbox((on) => gpgPassphraseField.refreshTypedHint(on));
+
   let gpgKeyringTried = false;
   async function fillGPGFromKeyring() {
     if (gpgKeyringTried || gpgPassphraseInput.value) return;
@@ -167,6 +170,7 @@ export function createRedeployPanel(): { el: HTMLElement; render: () => void } {
     sshKeyWrap.style.display = show ? "" : "none";
     gpgPassphraseWrap.style.display = show ? "" : "none";
     gpgConfirmWrap.style.display = show ? "" : "none";
+    remember.el.style.display = show ? "" : "none";
   }
 
   function updateGPGVisibility() {
@@ -322,6 +326,7 @@ export function createRedeployPanel(): { el: HTMLElement; render: () => void } {
     gpgPassphraseWrap,
     gpgConfirmWrap,
     gpgMismatchWarning,
+    remember.el,
     forceRebuildLabel,
     actionRow,
   ];
@@ -336,6 +341,7 @@ export function createRedeployPanel(): { el: HTMLElement; render: () => void } {
     gpgPassphraseWrap,
     gpgConfirmWrap,
     gpgMismatchWarning,
+    remember.el,
     forceRebuildLabel,
     actionRow,
     runSummary.el,
@@ -386,6 +392,7 @@ export function createRedeployPanel(): { el: HTMLElement; render: () => void } {
     el.style.display = show ? "" : "none";
     if (!show) return;
 
+    remember.sync(state.appName);
     logPane.showGame(state.appName);
     runSummary.render(state.appName, { running: "Redeploying", done: "Redeployed" });
     for (const part of formParts) part.style.display = running ? "none" : "";
