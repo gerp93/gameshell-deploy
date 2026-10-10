@@ -1,0 +1,20 @@
+# decrypted backups should never be committed anywhere
+*.sql
+
+# games/APP_NAME/backups/ holds operator-local database dumps (encrypted
+# and decrypted alike) — only games/APP_NAME/deploy.conf and the empty
+# backups/ dir itself (via .gitkeep) are tracked
+games/*/backups/*
+!games/*/backups/.gitkeep
+
+# last create.sh/delete.sh output written by the GUI — operator-local, same
+# as backups: useful after a failed run, not shared tooling
+games/*/last-create.log
+games/*/last-delete.log
+games/*/last-redeploy.log
+
+# gui/ (Wails app) build artifacts and generated bindings
+gui/frontend/dist/
+gui/frontend/node_modules/
+gui/frontend/wailsjs/
+gui/build/bin/

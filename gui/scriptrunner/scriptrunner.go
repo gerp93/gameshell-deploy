@@ -1,0 +1,552 @@
+// Package scriptrunner invokes create.sh/delete.sh non-interactively (via
+// their --ssh-key/--tier/--yes/--backup flags) and streams their stdout and
+// stderr line-by-line to a caller-supplied Emitter. Runs are tracked per app
+// name, so deploying/tearing down two different games at once is supported
+// — each gets its own process and its own stream of events. Both scripts
+// take --ssh-key: create.sh to attach that DigitalOcean key to the droplet,
+// delete.sh to pin the pre-teardown backup ssh/scp to the matching local
+// identity.
+package scriptrunner
+
+import (
+	"bufio"
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"io"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"sync"
+
+	"gameshell-deploy-gui/platform"
+)
+
+// LogLine is one line of a running script's stdout or stderr, tagged with
+// the app name it belongs to so the frontend can route it to the right
+// game's log pane even when multiple runs are in flight.
+type LogLine struct {
+	AppName string `json:"appName"`
+	Stream  string `json:"stream"`
+	Text    string `json:"text"`
+}
+
+// ExitInfo reports how a script run finished.
+type ExitInfo struct {
+	AppName string `json:"appName"`
+	Code    int    `json:"code"`
+	Err     string `json:"err,omitempty"`
+}
+
+// Emitter delivers log lines and the final exit status to the frontend. In
+// app.go this is backed by Wails' runtime.EventsEmit; kept as an interface
+// here so this package has no dependency on the Wails runtime.
+type Emitter interface {
+	EmitLog(event string, line LogLine)
+	EmitExit(event string, info ExitInfo)
+}
+
+// ExtraEnvVar is one extra secret copied onto the DO app. A slice of these
+// rather than map[string]string: Wails' generated TS models omit map fields,
+// so a map extraEnv never survived the frontend → Go round-trip.
+type ExtraEnvVar struct {
+	Key   string `json:"key"`
+	Value string `json:"value"`
+}
+
+// CreateRequest mirrors create.sh's positional arg + flags.
+type CreateRequest struct {
+	OpsDir     string `json:"opsDir"`
+	AppName    string `json:"appName"`
+	SSHKeyName string `json:"sshKeyName"`
+	Tier       string `json:"tier"`
+	// Region is optional and overrides deploy.conf's DROPLET_REGION for this
+	// deploy only (create.sh never rewrites the tracked config).
+	Region        string `json:"region"`
+	AutoYes       bool   `json:"autoYes"`
+	SQLUser       string `json:"sqlUser"`
+	SQLPassword   string `json:"sqlPassword"`
+	GPGPassphrase string `json:"gpgPassphrase"`
+	// ExtraEnv is KEY=value pairs listed (by name) in deploy.conf's
+	// EXTRA_ENV_VARS. Keys are the env var names copied onto the DO app;
+	// values come from the operator (never from deploy.conf).
+	ExtraEnv []ExtraEnvVar `json:"extraEnv"`
+}
+
+// DeleteRequest mirrors delete.sh's positional arg + flags. Backup is
+// "yes" or "no" — matching --backup=yes|no; leave empty to fall back to
+// delete.sh's own interactive prompt (not used by the GUI, but supported
+// for completeness). SSHKeyName is the DigitalOcean key used for the
+// backup ssh/scp (--ssh-key); unused when Backup is "no", since skip-
+// backup teardown never SSHes.
+type DeleteRequest struct {
+	OpsDir        string `json:"opsDir"`
+	AppName       string `json:"appName"`
+	Backup        string `json:"backup"`
+	SSHKeyName    string `json:"sshKeyName"`
+	GPGPassphrase string `json:"gpgPassphrase"`
+}
+
+// RedeployRequest mirrors redeploy.sh's positional arg + flags. Backup is
+// "yes" or "no" like DeleteRequest; SSHKeyName is the DigitalOcean key the
+// pre-redeploy backup's ssh/scp is pinned to (unused when Backup is "no").
+// redeploy.sh is always run with --yes: the GUI has no TTY for its prompts, so
+// the destructive-SQL warning is shown and acknowledged in the panel *before*
+// this request is sent (see CheckRedeploy), not by the script.
+type RedeployRequest struct {
+	OpsDir        string `json:"opsDir"`
+	AppName       string `json:"appName"`
+	Backup        string `json:"backup"`
+	SSHKeyName    string `json:"sshKeyName"`
+	GPGPassphrase string `json:"gpgPassphrase"`
+	ForceRebuild  bool   `json:"forceRebuild"`
+}
+
+// runningCmds tracks the one in-flight script per app name — deploying or
+// tearing down the same game twice at once isn't allowed, but different
+// games run fully independently.
+var (
+	runningMu   sync.Mutex
+	runningCmds = map[string]platform.Cmd{}
+)
+
+// RunCreate runs create.sh to completion, streaming output via emit under
+// the "create:log" / "create:exit" events (each tagged with req.AppName).
+func RunCreate(req CreateRequest, emit Emitter) error {
+	args := []string{req.AppName}
+	if req.SSHKeyName != "" {
+		args = append(args, "--ssh-key="+req.SSHKeyName)
+	}
+	if req.Tier != "" {
+		args = append(args, "--tier="+req.Tier)
+	}
+	if req.Region != "" {
+		args = append(args, "--region="+req.Region)
+	}
+	if req.AutoYes {
+		args = append(args, "--yes")
+	}
+	env := []string{
+		"DEPLOY_SQL_USER=" + req.SQLUser,
+		"DEPLOY_SQL_PASSWORD=" + req.SQLPassword,
+	}
+	if req.GPGPassphrase != "" {
+		env = append(env, "GPG_PASSPHRASE="+req.GPGPassphrase)
+	}
+	// Extra keys go into a YAML tempfile that create.sh cats into the spec,
+	// the same way SQL values land via sed — not as WSL `env KEY=VAL` argv.
+	// That's how YouTube/Claude keys were getting dropped while SQL still
+	// injected: DEPLOY_SQL_* are plain strings on this struct; a map extraEnv
+	// used to vanish in Wails TS, and even as a slice the values were a
+	// second lookup inside WSL that often wasn't set.
+	yamlHost, yamlScript, err := writeExtraEnvYAMLFile(req.ExtraEnv)
+	if err != nil {
+		emit.EmitExit("create:exit", ExitInfo{AppName: req.AppName, Code: -1, Err: err.Error()})
+		return err
+	}
+	if yamlHost != "" {
+		defer os.Remove(yamlHost)
+		env = append(env, "EXTRA_ENV_YAML_FILE="+yamlScript)
+	}
+	scriptPath := filepath.Join(req.OpsDir, "create.sh")
+	return run(req.AppName, req.OpsDir, scriptPath, args, env, "create", emit)
+}
+
+// RunDelete runs delete.sh to completion, streaming output via emit under
+// the "delete:log" / "delete:exit" events (each tagged with req.AppName).
+func RunDelete(req DeleteRequest, emit Emitter) error {
+	args := []string{req.AppName}
+	if req.Backup != "" {
+		args = append(args, "--backup="+req.Backup)
+	}
+	if req.SSHKeyName != "" {
+		args = append(args, "--ssh-key="+req.SSHKeyName)
+	}
+	var env []string
+	if req.GPGPassphrase != "" {
+		env = append(env, "GPG_PASSPHRASE="+req.GPGPassphrase)
+	}
+	scriptPath := filepath.Join(req.OpsDir, "delete.sh")
+	return run(req.AppName, req.OpsDir, scriptPath, args, env, "delete", emit)
+}
+
+// RunRedeploy runs redeploy.sh to completion, streaming output via emit under
+// the "redeploy:log" / "redeploy:exit" events (each tagged with req.AppName).
+func RunRedeploy(req RedeployRequest, emit Emitter) error {
+	args := []string{req.AppName, "--yes"}
+	if req.Backup != "" {
+		args = append(args, "--backup="+req.Backup)
+	}
+	if req.SSHKeyName != "" {
+		args = append(args, "--ssh-key="+req.SSHKeyName)
+	}
+	if req.ForceRebuild {
+		args = append(args, "--force-rebuild")
+	}
+	var env []string
+	if req.GPGPassphrase != "" {
+		env = append(env, "GPG_PASSPHRASE="+req.GPGPassphrase)
+	}
+	scriptPath := filepath.Join(req.OpsDir, "redeploy.sh")
+	return run(req.AppName, req.OpsDir, scriptPath, args, env, "redeploy", emit)
+}
+
+// TierOption is one price tier create.sh's --list-tiers reported as
+// available in the game's configured region. Number is the stable 1-based
+// tier number create.sh's --tier= flag expects back — it does NOT shift
+// based on which tiers are available (see create.sh's "get price tier"
+// section for why that distinction matters).
+type TierOption struct {
+	Number  int    `json:"number"`
+	Slug    string `json:"slug"`
+	AppSize string `json:"appSize"`
+	Label   string `json:"label"`
+}
+
+// ListAvailableTiers runs `create.sh APP_NAME --list-tiers`, which performs
+// the same region-availability check create.sh itself runs before deploying
+// (see its "get price tier" section) and exits without touching secrets,
+// backups, or the network beyond that check. Reusing the shell logic here
+// instead of reimplementing the jq/region-matching in Go keeps the GUI and
+// CLI paths from silently drifting apart.
+// region is optional: empty means "whatever deploy.conf's DROPLET_REGION
+// says", anything else is passed through as --region= to check a region the
+// operator is considering without editing the tracked config.
+func ListAvailableTiers(opsDir, appName, region string) ([]TierOption, error) {
+	scriptPath := filepath.Join(opsDir, "create.sh")
+	args := []string{appName, "--list-tiers"}
+	if region != "" {
+		args = append(args, "--region="+region)
+	}
+	cmd, err := platform.ScriptCommand(scriptPath, args, nil)
+	if err != nil {
+		return nil, err
+	}
+	out, err := cmd.Output()
+	if err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			return nil, fmt.Errorf("create.sh --list-tiers failed: %s", strings.TrimSpace(string(exitErr.Stderr)))
+		}
+		return nil, err
+	}
+
+	// Non-nil so this marshals to [] rather than null when no tier is
+	// available in the configured region — that's a legitimate result (the
+	// AMD sizes aren't sold in every region, notably not the nyc3 default),
+	// not an error, and the frontend iterates what it gets back.
+	tiers := []TierOption{}
+	scanner := bufio.NewScanner(bytes.NewReader(out))
+	for scanner.Scan() {
+		fields := strings.Split(scanner.Text(), "\t")
+		if len(fields) != 4 {
+			continue
+		}
+		number, err := strconv.Atoi(fields[0])
+		if err != nil {
+			continue
+		}
+		tiers = append(tiers, TierOption{Number: number, Slug: fields[1], AppSize: fields[2], Label: fields[3]})
+	}
+	return tiers, nil
+}
+
+// RegionOption is one Digital Ocean region that offers at least one of the
+// price tiers, as reported by create.sh's --list-regions.
+type RegionOption struct {
+	Slug string `json:"slug"`
+	Name string `json:"name"`
+}
+
+// ListAvailableRegions runs `create.sh APP_NAME --list-regions`, the same
+// list create.sh's interactive retry prompt offers when the configured
+// region has no tiers available.
+func ListAvailableRegions(opsDir, appName string) ([]RegionOption, error) {
+	scriptPath := filepath.Join(opsDir, "create.sh")
+	cmd, err := platform.ScriptCommand(scriptPath, []string{appName, "--list-regions"}, nil)
+	if err != nil {
+		return nil, err
+	}
+	out, err := cmd.Output()
+	if err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			return nil, fmt.Errorf("create.sh --list-regions failed: %s", strings.TrimSpace(string(exitErr.Stderr)))
+		}
+		return nil, err
+	}
+
+	regions := []RegionOption{}
+	scanner := bufio.NewScanner(bytes.NewReader(out))
+	for scanner.Scan() {
+		fields := strings.Split(scanner.Text(), "\t")
+		if len(fields) != 2 {
+			continue
+		}
+		regions = append(regions, RegionOption{Slug: fields[0], Name: fields[1]})
+	}
+	return regions, nil
+}
+
+// ListSSHKeys runs `create.sh --list-ssh-keys` (via WSL on Windows) and
+// returns DigitalOcean key names that also exist on this machine (~/.ssh
+// or ssh-agent). Reusing the shell logic keeps the GUI dropdowns and the
+// CLI prompt on the same filtered list, so a key that only lives on
+// another PC cannot be selected here.
+func ListSSHKeys(opsDir string) ([]string, error) {
+	scriptPath := filepath.Join(opsDir, "create.sh")
+	cmd, err := platform.ScriptCommand(scriptPath, []string{"--list-ssh-keys"}, nil)
+	if err != nil {
+		return nil, err
+	}
+	out, err := cmd.Output()
+	if err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			return nil, fmt.Errorf("create.sh --list-ssh-keys failed: %s", strings.TrimSpace(string(exitErr.Stderr)))
+		}
+		return nil, err
+	}
+
+	names := []string{}
+	scanner := bufio.NewScanner(bytes.NewReader(out))
+	for scanner.Scan() {
+		line := scanner.Text()
+		if line != "" {
+			names = append(names, line)
+		}
+	}
+	return names, nil
+}
+
+// StatusResult reports whether a droplet/app for a game already exist on
+// Digital Ocean, so the GUI knows whether it's set up for a Deploy or a
+// Teardown.
+type StatusResult struct {
+	DropletExists bool `json:"dropletExists"`
+	AppExists     bool `json:"appExists"`
+	// AppURL is the deployed app's public ingress URL, empty when no app
+	// exists (or when DO hasn't assigned one yet — it can lag briefly right
+	// after a deploy).
+	AppURL string `json:"appURL"`
+	// UpSince is when the game started costing money, as an RFC 3339 UTC
+	// time: the earlier of the droplet's and the app's creation. Empty when
+	// neither exists. A redeploy doesn't reset it — DO keeps the app's
+	// original creation time — which is what "how long has this been up"
+	// should mean for billing.
+	UpSince string `json:"upSince"`
+}
+
+// CheckStatus looks up appName (deploy.conf's APP_NAME, not the games/
+// directory name) the same way create.sh/delete.sh do: droplet named
+// "APP_NAME-database", and an app whose spec name contains APP_NAME.
+func CheckStatus(appName string) (StatusResult, error) {
+	snap, err := listResources()
+	if err != nil {
+		return StatusResult{}, err
+	}
+	return snap.statusFor(appName), nil
+}
+
+// BalanceResult is `doctl balance get`'s month-to-date picture. The amounts
+// are DO's own decimal strings (e.g. "12.34", USD) passed through untouched,
+// so nothing here does float math on money.
+type BalanceResult struct {
+	// MonthToDateUsage is what the whole DO account has accrued this billing
+	// period — every droplet/app on the account, not just the ones this tool
+	// created.
+	MonthToDateUsage string `json:"monthToDateUsage"`
+	// AccountBalance is the balance as of the last billing activity.
+	AccountBalance string `json:"accountBalance"`
+	GeneratedAt    string `json:"generatedAt"`
+}
+
+// GetBalance reports this month's spend via `doctl balance get`. DO generates
+// the figure periodically rather than live, so GeneratedAt says how fresh it
+// is. A scoped API token without billing access fails here, and the doctl
+// message is returned so the UI can say why.
+func GetBalance() (BalanceResult, error) {
+	cmd, err := platform.RawCommand("doctl", []string{"balance", "get", "-o", "json"})
+	if err != nil {
+		return BalanceResult{}, err
+	}
+	// Combined, because with -o json doctl reports API errors on stdout as
+	// {"errors":[{"detail":...}]} rather than on stderr.
+	outBytes, err := cmd.CombinedOutput()
+	out := string(outBytes)
+	if err != nil {
+		return BalanceResult{}, balanceError(out, err)
+	}
+	var raw struct {
+		MonthToDateUsage string `json:"month_to_date_usage"`
+		AccountBalance   string `json:"account_balance"`
+		GeneratedAt      string `json:"generated_at"`
+	}
+	if err := json.Unmarshal([]byte(out), &raw); err != nil {
+		return BalanceResult{}, fmt.Errorf("could not read doctl balance output: %w", err)
+	}
+	return BalanceResult{
+		MonthToDateUsage: raw.MonthToDateUsage,
+		AccountBalance:   raw.AccountBalance,
+		GeneratedAt:      raw.GeneratedAt,
+	}, nil
+}
+
+// balanceError turns a failed `doctl balance get` into something the operator
+// can act on. A 403 is by far the likeliest failure: a custom-scoped API token
+// that can manage droplets/apps but has no billing access.
+func balanceError(output string, err error) error {
+	var parsed struct {
+		Errors []struct {
+			Detail string `json:"detail"`
+		} `json:"errors"`
+	}
+	detail := strings.TrimSpace(output)
+	if json.Unmarshal([]byte(detail), &parsed) == nil && len(parsed.Errors) > 0 {
+		detail = parsed.Errors[0].Detail
+	}
+	if strings.Contains(detail, "403") || strings.Contains(detail, "not authorized") {
+		return fmt.Errorf("this DigitalOcean API token isn't allowed to read billing (403). Use a token with billing/account read access (`doctl auth init`) to see spend")
+	}
+	if detail == "" {
+		return err
+	}
+	return fmt.Errorf("%s", detail)
+}
+
+func runDoctl(args ...string) (string, error) {
+	cmd, err := platform.RawCommand("doctl", args)
+	if err != nil {
+		return "", err
+	}
+	out, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
+	return string(out), nil
+}
+
+// Cancel kills the running script for appName, if any. It does not clean up
+// any cloud resources the script may have already created before being
+// killed — the DO droplet/app may need manual teardown afterward.
+func Cancel(appName string) bool {
+	runningMu.Lock()
+	defer runningMu.Unlock()
+	cmd, ok := runningCmds[appName]
+	if !ok || cmd == nil || cmd.Process == nil {
+		return false
+	}
+	_ = cmd.Process.Kill()
+	return true
+}
+
+func run(appName, opsDir, scriptPath string, args []string, env []string, label string, emit Emitter) error {
+	if err := claim(appName); err != nil {
+		emit.EmitExit(label+":exit", ExitInfo{AppName: appName, Code: -1, Err: err.Error()})
+		return err
+	}
+	defer release(appName)
+
+	// Last-run log next to deploy.conf, so a failed create that flips the
+	// GUI to Teardown (droplet already exists) still has the script output
+	// on disk. Truncated each run; never holds env/secrets — only stdout/
+	// stderr lines create.sh/delete.sh already printed.
+	var logMu sync.Mutex
+	var logFile *os.File
+	if opsDir != "" {
+		logPath := filepath.Join(opsDir, "games", appName, "last-"+label+".log")
+		if f, err := os.Create(logPath); err == nil {
+			logFile = f
+			defer logFile.Close()
+		}
+	}
+	writeLog := func(stream, text string) {
+		if logFile == nil {
+			return
+		}
+		logMu.Lock()
+		defer logMu.Unlock()
+		_, _ = fmt.Fprintf(logFile, "[%s] %s\n", stream, text)
+	}
+
+	cmd, err := platform.ScriptCommand(scriptPath, args, env)
+	if err != nil {
+		writeLog("exit", err.Error())
+		emit.EmitExit(label+":exit", ExitInfo{AppName: appName, Code: -1, Err: err.Error()})
+		return err
+	}
+
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		writeLog("exit", err.Error())
+		emit.EmitExit(label+":exit", ExitInfo{AppName: appName, Code: -1, Err: err.Error()})
+		return err
+	}
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		writeLog("exit", err.Error())
+		emit.EmitExit(label+":exit", ExitInfo{AppName: appName, Code: -1, Err: err.Error()})
+		return err
+	}
+
+	if err := cmd.Start(); err != nil {
+		writeLog("exit", err.Error())
+		emit.EmitExit(label+":exit", ExitInfo{AppName: appName, Code: -1, Err: err.Error()})
+		return err
+	}
+
+	runningMu.Lock()
+	runningCmds[appName] = cmd
+	runningMu.Unlock()
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go streamLines(stdout, "stdout", appName, label, emit, writeLog, &wg)
+	go streamLines(stderr, "stderr", appName, label, emit, writeLog, &wg)
+	wg.Wait()
+
+	waitErr := cmd.Wait()
+
+	exitInfo := ExitInfo{AppName: appName, Code: cmd.ProcessState.ExitCode()}
+	if waitErr != nil {
+		exitInfo.Err = waitErr.Error()
+	}
+	if exitInfo.Err != "" {
+		writeLog("exit", fmt.Sprintf("code %d: %s", exitInfo.Code, exitInfo.Err))
+	} else {
+		writeLog("exit", fmt.Sprintf("code %d", exitInfo.Code))
+	}
+	emit.EmitExit(label+":exit", exitInfo)
+	return waitErr
+}
+
+// claim reserves appName as running, failing if it already has a run in
+// flight (deploying/tearing down the same game twice at once isn't
+// supported — different games are independent and don't hit this).
+func claim(appName string) error {
+	runningMu.Lock()
+	defer runningMu.Unlock()
+	if _, ok := runningCmds[appName]; ok {
+		return fmt.Errorf("a run is already in progress for %s", appName)
+	}
+	runningCmds[appName] = nil // reserve the slot before the process exists
+	return nil
+}
+
+func release(appName string) {
+	runningMu.Lock()
+	defer runningMu.Unlock()
+	delete(runningCmds, appName)
+}
+
+func streamLines(r io.Reader, stream, appName, label string, emit Emitter, writeLog func(stream, text string), wg *sync.WaitGroup) {
+	defer wg.Done()
+	scanner := bufio.NewScanner(r)
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	for scanner.Scan() {
+		text := scanner.Text()
+		if writeLog != nil {
+			writeLog(stream, text)
+		}
+		emit.EmitLog(label+":log", LogLine{AppName: appName, Stream: stream, Text: text})
+	}
+}

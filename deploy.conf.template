@@ -1,0 +1,72 @@
+# TEMPLATE. Not read directly by any script — copy it, don't edit it in place.
+#
+# Copy this file to games/APP_NAME/deploy.conf (relative to this gameshell-deploy
+# checkout) and fill in the values there. The copy is what's sourced by the
+# gameshell-deploy scripts (create.sh / delete.sh), invoked as
+# `./create.sh APP_NAME` / `./delete.sh APP_NAME`. Only non-secret values live
+# here — database credentials come from the operator's environment
+# (DEPLOY_SQL_USER / DEPLOY_SQL_PASSWORD), extra secrets from EXTRA_ENV_VARS
+# names looked up in the environment. Backups for this game live in
+# games/APP_NAME/backups/.
+
+# DO app + droplet base name (droplet is "<APP_NAME>-database").
+APP_NAME=my-game
+
+# Env var prefix the app reads at runtime. MUST match the game's
+# database.SetEnvVarPrefix(...) call in main.go. Drives the env var KEYS injected
+# into the DO app (e.g. MY_GAME_SQL_HOST, MY_GAME_SQL_USER, ...).
+ENV_VAR_PREFIX=MY_GAME
+
+# Optional: extra env var NAMES to copy from the operator's environment onto
+# the DO app (API keys, etc.). Space- or comma-separated. Values never live
+# in this file — create.sh looks each name up at deploy time, same as
+# DEPLOY_SQL_*. A leading '+' concatenates ENV_VAR_PREFIX
+# ("+YT_API_KEY" becomes MY_GAME_YT_API_KEY); unmarked names are injected
+# as-is. Quote the value if you use spaces (otherwise bash treats later
+# names as commands): EXTRA_ENV_VARS="+YT_API_KEY +OTHER". Commas need no
+# quotes: EXTRA_ENV_VARS=+YT_API_KEY,+OTHER
+EXTRA_ENV_VARS=
+
+# Optional: test an EXTRA_ENV_VARS key against the service that issued it
+# before deploying (GUI only - create.sh ignores these lines; the GUI's Config
+# tab can edit and test them, or write them here by hand). One line per
+# key, named after its EXTRA_ENV_VARS entry without the '+':
+#   SECRET_CHECK_<NAME>="<https URL>|<Header: value>|<Header: value>"
+# The request is a GET. {KEY} is replaced with the key (URL-escaped inside the
+# URL, verbatim inside a header). Pick a free, read-only endpoint. A 400/401/403
+# means "rejected" and blocks the deploy (click Deploy again to override);
+# rate limits, 5xx and network errors only warn. Only https:// is allowed, and
+# the key is sent to whatever host is written here, so review any change to
+# these lines. Examples (track-timeline's YT_API_KEY / ANTHROPIC_API_KEY):
+#   SECRET_CHECK_YT_API_KEY="https://www.googleapis.com/youtube/v3/videos?part=id&id=dQw4w9WgXcQ&key={KEY}"
+#   SECRET_CHECK_ANTHROPIC_API_KEY="https://api.anthropic.com/v1/models|x-api-key: {KEY}|anthropic-version: 2023-06-01"
+
+# Database name created on the droplet and restored into.
+DB_NAME=MY_GAME
+
+# Port the container serves on (matches Dockerfile EXPOSE and the app default).
+HTTP_PORT=2016
+
+# GitHub repo DO App Platform deploys from ("owner/name").
+GIT_REPO=owner/my-game
+
+# Optional: upstream repo to sync a fork from before deploying. Leave blank to
+# skip the fork-sync step entirely.
+GIT_UPSTREAM=
+
+# Optional: branch DO App Platform deploys (and that the fork-sync step above
+# syncs). Leave blank to use the repo's own default branch, which is detected
+# rather than assumed — don't set this to "main" just to be explicit, or a repo
+# whose default is something else will silently deploy the wrong branch.
+GIT_BRANCH=
+
+# Optional droplet overrides (defaults shown).
+DROPLET_REGION=nyc3
+DROPLET_IMAGE=centos-stream-9-x64
+DROPLET_SIZE=s-1vcpu-1gb-amd
+
+# Optional: how many hours this game should stay deployed. The GUI shows how
+# long it has been up and turns the tag red once it passes this, as a nudge to
+# tear it down — it is a reminder only and never tears anything down itself.
+# Whole hours, 1 or more; leave blank for no limit. create.sh ignores it.
+MAX_UPTIME_HOURS=
