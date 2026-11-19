@@ -1,4 +1,4 @@
-import { checkStatus, getOpsDir, listGameStatuses, listGames, loadDeployConf, loadSettings, selectApp, type StatusResult } from "./api";
+import { checkGameStatus, getOpsDir, listGameStatuses, listGames, loadDeployConf, loadSettings, selectApp, type StatusResult } from "./api";
 import { refreshCodeCheck } from "./codeCheck";
 import { state, notify, runningKind } from "./state";
 import { tagForGame } from "./uptime";
@@ -12,7 +12,7 @@ export async function refreshStatus(): Promise<void> {
     state.codeCheck = null;
     return;
   }
-  state.status = await checkStatus(state.deployConf.appName);
+  state.status = await checkGameStatus(state.opsDir, state.appName);
   // Whether there's undeployed code depends on whether an app exists, so
   // every status refresh (game selected, run finished) re-asks. Not awaited:
   // it makes network calls and shouldn't hold up showing the game.
@@ -73,7 +73,7 @@ export function scheduleStatusReconcile(appName: string, delayMs = 6000): void {
     // owns this game's status and will reconcile when it finishes.
     if (state.appName !== appName || runningKind(appName) || !state.deployConf?.appName) return null;
     try {
-      return await checkStatus(state.deployConf.appName);
+      return await checkGameStatus(state.opsDir, appName);
     } catch {
       return null; // a failed re-check shouldn't clobber the optimistic value
     }

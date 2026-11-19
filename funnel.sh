@@ -6,6 +6,7 @@
 # Usage:  ./funnel.sh APP_NAME on [--yes]
 #         ./funnel.sh APP_NAME off
 #         ./funnel.sh APP_NAME status
+#         ./funnel.sh APP_NAME info      (one machine-readable line; the GUI uses it)
 #   Funnel only allows ports 443, 8443 and 10000 on the box's .ts.net name, so
 #   at most three games can be public, one each. deploy.conf's
 #   HOLOCRON_FUNNEL_PORT says which port this game uses; the game itself stays
@@ -35,12 +36,12 @@ for arg in "$@"; do
 			echo "Unknown option: $arg"
 			exit 1
 			;;
-		on | off | status) ACTION="$arg" ;;
+		on | off | status | info) ACTION="$arg" ;;
 		*) APP_NAME_ARG="$arg" ;;
 	esac
 done
-: "${APP_NAME_ARG:?Usage: ./funnel.sh APP_NAME on|off|status [--yes]}"
-: "${ACTION:?Usage: ./funnel.sh APP_NAME on|off|status [--yes]}"
+: "${APP_NAME_ARG:?Usage: ./funnel.sh APP_NAME on|off|status|info [--yes]}"
+: "${ACTION:?Usage: ./funnel.sh APP_NAME on|off|status|info [--yes]}"
 GAME_CONFIG_DIR="$OPS_DIR/games/$APP_NAME_ARG"
 
 CONFIG_PATH="$GAME_CONFIG_DIR/deploy.conf"
@@ -58,4 +59,8 @@ fi
 
 # shellcheck source=targets/holocron.sh
 source "$OPS_DIR/targets/holocron.sh"
-holocron_funnel "$ACTION"
+if [[ "$ACTION" == "info" ]]; then
+	holocron_info
+else
+	holocron_funnel "$ACTION"
+fi

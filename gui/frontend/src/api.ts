@@ -41,6 +41,14 @@ export interface DeployConf {
   gitRepo: string;
   gitUpstream: string;
   gitBranch: string;
+  // "" or "digitalocean" (default), or "holocron" (the home server). The
+  // holocron* fields only apply to the latter.
+  target: string;
+  holocronHostPort: string;
+  holocronFunnelPort: string;
+  holocronBind: string;
+  holocronCpus: string;
+  holocronMemory: string;
   dropletRegion: string;
   dropletImage: string;
   dropletSize: string;
@@ -92,6 +100,11 @@ export interface StatusResult {
   // RFC 3339 time the game came up (see StatusResult in scriptrunner.go);
   // "" when nothing is deployed.
   upSince: string;
+  // True for a game on the home server. There dropletExists means "its
+  // database exists" and appExists "its container exists".
+  holocron: boolean;
+  // Whether Tailscale Funnel is serving the game (home server only).
+  funnelOn: boolean;
 }
 
 // One game's row from listGameStatuses — everything the sidebar needs about a
@@ -101,6 +114,8 @@ export interface GameStatus {
   hasConf: boolean;
   maxUptimeHours: number;
   status: StatusResult;
+  // Set when the status could not be read (e.g. the home server is off).
+  error: string;
 }
 
 export interface UpdateInfo {
@@ -234,6 +249,11 @@ export const listAvailableRegions = (opsDir: string, appName: string): Promise<R
 export const openURL = (url: string): Promise<void> => Backend.OpenURL(url);
 export const getBalance = (): Promise<BalanceResult> => Backend.GetBalance();
 export const checkStatus = (appName: string): Promise<StatusResult> => Backend.CheckStatus(appName);
+export const checkGameStatus = (opsDir: string, game: string): Promise<StatusResult> =>
+  Backend.CheckGameStatus(opsDir, game) as Promise<StatusResult>;
+// Turns Tailscale Funnel on or off for a home-server game, or reports it.
+export const runFunnel = (opsDir: string, game: string, action: "on" | "off" | "status"): Promise<string> =>
+  Backend.RunFunnel(opsDir, game, action);
 export const listGameStatuses = (opsDir: string, games: string[]): Promise<GameStatus[]> =>
   Backend.ListGameStatuses(opsDir, games) as Promise<GameStatus[]>;
 

@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"gameshell-deploy-gui/deployconf"
+	"gameshell-deploy-gui/holocron"
 	"gameshell-deploy-gui/platform"
 )
 
@@ -90,7 +91,90 @@ func RunChecks(opsDir string) Result {
 		games = checkRepos(opsDir)
 	}
 
+	games = addHolocronChecks(opsDir, games)
+
 	return Result{WSLBlocking: false, Checks: checks, Games: games}
+}
+
+// addHolocronChecks adds, for every game that runs on the home server
+// (TARGET=holocron), a check that the box answers over ssh. It is a per-game
+// check on purpose: a switched-off home server must not stop a DigitalOcean
+// game from deploying. ssh is tried once however many games use the box.
+func addHolocronChecks(opsDir string, games []GameChecks) []GameChecks {
+	if opsDir == "" {
+		return games
+	}
+	entries, err := os.ReadDir(filepath.Join(opsDir, "games"))
+	if err != nil {
+		return games
+	}
+	var onBox []string
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		path := filepath.Join(opsDir, "games", e.Name(), "deploy.conf")
+		if !deployconf.Exists(path) {
+			continue
+		}
+		if conf, err := deployconf.Load(path); err == nil && conf.IsHolocron() {
+			onBox = append(onBox, e.Name())
+		}
+	}
+	if len(onBox) == 0 {
+		return games
+	}
+
+	result := checkHolocronBox()
+	for _, name := range onBox {
+		found := false
+		for i := range games {
+			if games[i].Game == name {
+				games[i].Checks = append(games[i].Checks, result)
+				found = true
+				break
+			}
+		}
+		if !found {
+			games = append(games, GameChecks{Game: name, Checks: []CheckResult{result}})
+		}
+	}
+	return games
+}
+
+// checkHolocronBox tries `ssh <home server> true` with the same ssh the
+// scripts will use (the Windows OpenSSH client on Windows). The address is
+// never put in the message: it can be seen in ~/.config/kvguzzler/deploy.env.
+func checkHolocronBox() CheckResult {
+	const name = "Home server (ssh)"
+	target, err := holocron.SSHTarget()
+	if err != nil {
+		return CheckResult{Name: name, OK: false, Detail: err.Error()}
+	}
+	prog, err := holocron.SSHProgram()
+	if err != nil {
+		return CheckResult{Name: name, OK: false, Detail: err.Error()}
+	}
+	cmd, err := platform.RawCommand(prog, []string{"-o", "BatchMode=yes", "-o", "ConnectTimeout=10", target, "true"})
+	if err != nil {
+		return CheckResult{Name: name, OK: false, Detail: err.Error()}
+	}
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Start(); err != nil {
+		return CheckResult{Name: name, OK: false, Detail: err.Error()}
+	}
+	timer := time.AfterFunc(repoCheckTimeout, func() { _ = cmd.Process.Kill() })
+	err = cmd.Wait()
+	timer.Stop()
+	if err == nil {
+		return CheckResult{Name: name, OK: true, Detail: "The home server answered over ssh."}
+	}
+	reason := firstLine(stderr.String())
+	if reason == "" {
+		reason = err.Error()
+	}
+	return CheckResult{Name: name, OK: false, Detail: reason + " — is the home server switched on, and is this PC's ssh key authorised on it? Games on Digital Ocean are not affected."}
 }
 
 // repoProbe is one remote a game deploys from or syncs with.

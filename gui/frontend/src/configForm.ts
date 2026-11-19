@@ -30,6 +30,12 @@ const emptyConf: DeployConf = {
   gitRepo: "",
   gitUpstream: "",
   gitBranch: "",
+  target: "",
+  holocronHostPort: "",
+  holocronFunnelPort: "",
+  holocronBind: "",
+  holocronCpus: "",
+  holocronMemory: "",
   dropletRegion: "",
   dropletImage: "",
   dropletSize: "",
@@ -42,7 +48,11 @@ const emptyConf: DeployConf = {
 // secretChecks list, which lives in the extra-env rows).
 type TextFieldKey = Exclude<keyof DeployConf, "secretChecks">;
 
-const fieldDefs: Array<{ key: TextFieldKey; label: string; required: boolean }> = [
+// Which target a field belongs to: "do" fields only matter for DigitalOcean
+// games, "holocron" fields only for games on the home server, the rest for both.
+type FieldGroup = "do" | "holocron" | undefined;
+
+const fieldDefs: Array<{ key: TextFieldKey; label: string; required: boolean; group?: FieldGroup }> = [
   { key: "appName", label: "APP_NAME", required: true },
   { key: "envVarPrefix", label: "ENV_VAR_PREFIX", required: true },
   { key: "dbName", label: "DB_NAME", required: true },
@@ -50,9 +60,24 @@ const fieldDefs: Array<{ key: TextFieldKey; label: string; required: boolean }> 
   { key: "gitRepo", label: "GIT_REPO (owner/name)", required: true },
   { key: "gitUpstream", label: "GIT_UPSTREAM (optional)", required: false },
   { key: "gitBranch", label: "GIT_BRANCH (blank = repo default)", required: false },
-  { key: "dropletRegion", label: "DROPLET_REGION (optional)", required: false },
-  { key: "dropletImage", label: "DROPLET_IMAGE (optional)", required: false },
-  { key: "dropletSize", label: "DROPLET_SIZE (optional)", required: false },
+  { key: "holocronHostPort", label: "HOLOCRON_HOST_PORT (port on the home server, one per game)", required: false, group: "holocron" },
+  {
+    key: "holocronFunnelPort",
+    label: "HOLOCRON_FUNNEL_PORT (443, 8443 or 10000 — only needed for Funnel)",
+    required: false,
+    group: "holocron",
+  },
+  {
+    key: "holocronBind",
+    label: "HOLOCRON_BIND (blank = only on the box; 0.0.0.0 = also on your home network)",
+    required: false,
+    group: "holocron",
+  },
+  { key: "holocronCpus", label: "HOLOCRON_CPUS (optional, default 1)", required: false, group: "holocron" },
+  { key: "holocronMemory", label: "HOLOCRON_MEMORY (optional, default 512m)", required: false, group: "holocron" },
+  { key: "dropletRegion", label: "DROPLET_REGION (optional)", required: false, group: "do" },
+  { key: "dropletImage", label: "DROPLET_IMAGE (optional)", required: false, group: "do" },
+  { key: "dropletSize", label: "DROPLET_SIZE (optional)", required: false, group: "do" },
   { key: "maxUptimeHours", label: "MAX_UPTIME_HOURS (optional — warn when up longer)", required: false },
 ];
 
@@ -83,10 +108,31 @@ export function createConfigForm(): { el: HTMLElement; render: () => void } {
   cloneWrap.append(cloneLabel, cloneRow, cloneMessage);
 
   const form = document.createElement("form");
+
+  // Where the game runs. Decides which of the fields below apply (droplet
+  // settings for DigitalOcean, ports for the home server).
+  const targetWrap = document.createElement("div");
+  targetWrap.className = "field";
+  const targetLabel = document.createElement("label");
+  targetLabel.textContent = "TARGET (where the game runs)";
+  const targetSelect = document.createElement("select");
+  for (const [value, text] of [
+    ["", "Digital Ocean (app + database droplet)"],
+    ["holocron", "Home server (holocron: Docker, optional Tailscale Funnel)"],
+  ]) {
+    const opt = document.createElement("option");
+    opt.value = value;
+    opt.textContent = text;
+    targetSelect.appendChild(opt);
+  }
+  targetWrap.append(targetLabel, targetSelect);
+  form.appendChild(targetWrap);
+
   const grid = document.createElement("div");
   grid.className = "field-grid";
   form.appendChild(grid);
   const inputs: Partial<Record<TextFieldKey, HTMLInputElement>> = {};
+  const wrappers: Partial<Record<TextFieldKey, HTMLElement>> = {};
 
   for (const def of fieldDefs) {
     const wrapper = document.createElement("div");
@@ -99,7 +145,21 @@ export function createConfigForm(): { el: HTMLElement; render: () => void } {
     wrapper.appendChild(input);
     grid.appendChild(wrapper);
     inputs[def.key] = input;
+    wrappers[def.key] = wrapper;
   }
+
+  // Shows the fields that apply to the chosen target and hides the rest. The
+  // hidden ones keep their values (they are still saved as typed), they just
+  // aren't asked about.
+  function applyTarget() {
+    const holocron = targetSelect.value === "holocron";
+    for (const def of fieldDefs) {
+      const wrapper = wrappers[def.key];
+      if (wrapper && def.group) wrapper.style.display = (def.group === "holocron") === holocron ? "" : "none";
+    }
+    if (inputs.holocronHostPort) inputs.holocronHostPort.required = holocron;
+  }
+  targetSelect.onchange = () => applyTarget();
   if (inputs.envVarPrefix) {
     inputs.envVarPrefix.oninput = () => {
       for (const row of extraEnvRows) updateRowResolved(row);
@@ -350,6 +410,7 @@ export function createConfigForm(): { el: HTMLElement; render: () => void } {
     for (const def of fieldDefs) {
       conf[def.key] = inputs[def.key]!.value;
     }
+    conf.target = targetSelect.value;
     conf.extraEnvVars = extraEnvFromRows();
     conf.secretChecks = secretChecksFromRows();
     return conf;
@@ -359,6 +420,8 @@ export function createConfigForm(): { el: HTMLElement; render: () => void } {
     for (const def of fieldDefs) {
       inputs[def.key]!.value = conf[def.key] ?? "";
     }
+    targetSelect.value = conf.target === "holocron" ? "holocron" : "";
+    applyTarget();
     fillExtraEnvRows(conf.extraEnvVars ?? "", conf.secretChecks ?? []);
   }
 

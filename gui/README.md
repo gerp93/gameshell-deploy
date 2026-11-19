@@ -109,6 +109,32 @@ the script with `--yes`, so this is where that warning is answered. As with
 Deploy and Teardown, the run's settings (repo, branch, commit range, backup,
 SSH key, secrets as ✓ set / ✗ not set…) are shown above the log.
 
+## Games on the home server (the "holocron" target)
+
+A game's **Config** tab has a **TARGET** choice: Digital Ocean (the default) or
+**Home server**. Choosing the home server swaps the droplet fields for
+`HOLOCRON_HOST_PORT`, `HOLOCRON_FUNNEL_PORT`, `HOLOCRON_BIND`, `HOLOCRON_CPUS`
+and `HOLOCRON_MEMORY` (see `targets/holocron.sh`). For such a game:
+
+- **Deploy** asks only for the extra API keys and the GPG passphrase (no ssh
+  key, region, price tier or SQL user: the box makes its own database
+  password). It builds the game on the home server and restores the newest
+  `backups/*.gpg`.
+- **Manage** has the same **Redeploy** and **Teardown**, plus an **Internet
+  access (Tailscale Funnel)** panel: a new game is private, and **Turn on
+  Funnel** (which asks first) is the only way the GUI makes one public.
+- The sidebar tag and header work as for Digital Ocean games, read from the
+  box (the database counts as the "droplet", the container as the "app").
+  A home server that can't be reached shows **unknown**, not "down".
+- **Prerequisites** gets a per-game "Home server (ssh)" check, so a switched-off
+  box never blocks Digital Ocean games.
+- The scripts run in WSL on Windows, and WSL has no key for the box, so the GUI
+  has them use the **Windows OpenSSH client** (`ssh.exe`, with this PC's own
+  keys and agent). The box's address is never stored by the GUI or in the repo:
+  it is `HOLOCRON_SSH_TARGET` or `DEPLOY_TARGET` in
+  `~/.config/kvguzzler/deploy.env` on this computer, passed to the scripts as
+  environment.
+
 ## Status tags and uptime
 
 Each game in the sidebar has a second line: **deployed**, **down**, or
@@ -143,10 +169,13 @@ build time, `CheckForUpdate` will always report "up to date."
 
 ## Layout
 
+- `holocron/` — finds the home server's ssh target and works out the
+  environment the scripts need to reach it (Windows `ssh.exe` under WSL).
 - `platform/` — OS-specific command building (native on macOS/Linux, via
   `wsl.exe` on Windows); everything else in this app is OS-agnostic.
 - `scriptrunner/` — invokes `create.sh`/`delete.sh`/`redeploy.sh` and streams
-  their output; `redeploycheck.go` runs `redeploy.sh --check` and parses it.
+  their output; `redeploycheck.go` runs `redeploy.sh --check` and parses it;
+  `holocron.go` asks `funnel.sh` for a home-server game's state and runs Funnel.
 - `deployconf/` — reads/writes a game's `games/APP_NAME/deploy.conf` without
   disturbing its comments.
 - `preflight/` — checks doctl/gpg/ssh (and WSL, on Windows) are present.

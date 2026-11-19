@@ -128,8 +128,9 @@ nothing about that path changes. The code is in [targets/holocron.sh](targets/ho
   `HOLOCRON_FUNNEL_PORT`. Funnel only allows ports 443, 8443 and 10000 on the box's `.ts.net` name, so at most three games, one
   per port. Two account settings in the Tailscale admin console come first and are never changed by this tool: DNS > HTTPS
   Certificates, and an access-policy entry that allows Funnel for the box.
-- Not supported yet: the GUI's `EXTRA_ENV_YAML_FILE` (use `EXTRA_ENV_VARS` and the environment), and everything in `gui/`
-  (see [TODO.md](TODO.md)).
+- The GUI (`gui/`) supports it too: pick **Home server** as the target on a game's Config tab (see [gui/README.md](gui/README.md)). It
+  has the scripts use the Windows `ssh.exe`, since WSL has no key for the box, and passes API keys to `targets/holocron.sh` through
+  the same temporary `EXTRA_ENV_YAML_FILE` it uses for DigitalOcean.
 
 ## How env vars line up
 

@@ -6,12 +6,10 @@ and its `REPO_SCOPE.md` entry for that). Just what's not built yet.
 
 ## Features
 
-- GUI support for the `holocron` target (`gui/` was deliberately left alone). It would need: a Target choice on the Config tab that
-  writes `TARGET`, `HOLOCRON_HOST_PORT`, `HOLOCRON_FUNNEL_PORT` and `HOLOCRON_BIND` into `deploy.conf` (and hides the droplet region/
-  tier/ssh-key controls); no tier/region/ssh-key arguments for those games (the scripts ignore them but print a note); passing extra
-  keys as environment variables (the target rejects `EXTRA_ENV_YAML_FILE`) or teaching `targets/holocron.sh` to read that file; a
-  Funnel on/off/status button that runs `funnel.sh`; its "new code available" notice already works through `redeploy.sh --check`,
-  which the target answers from the running container; and the Prerequisites tab should check `ssh` to the box instead of `doctl`.
+- Home-server (holocron) games in the GUI: the Config tab, Deploy, Manage, sidebar status, a per-game ssh check and a Funnel panel are
+  done (see gui/README.md). Not done: the Funnel panel cannot yet say whether the two Tailscale admin-console switches are on before it
+  tries; and `tailscale funnel ... off` / the `funnel.sh info` URL parsing have only been checked against the CLI's help, not on a
+  machine with Funnel enabled.
 - `./funnel.sh` could also set `tailscale serve` for a tailnet-only HTTPS address.
 
 ## Fixes

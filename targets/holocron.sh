@@ -34,6 +34,9 @@
 # The ssh target (user@host) is never stored in this repo: it is
 # HOLOCRON_SSH_TARGET from the environment, or DEPLOY_TARGET from
 # ~/.config/kvguzzler/deploy.env (override the path with HOLOCRON_ENV_FILE).
+# HOLOCRON_SSH names the ssh program to use (default: ssh). The GUI on Windows sets it
+# to the Windows OpenSSH client (ssh.exe) so the scripts, which run inside WSL there,
+# use the same keys and agent as the rest of the PC instead of needing their own.
 #
 # Operator secrets: GPG_PASSPHRASE (optional, same as the DigitalOcean path) and,
 # for EXTRA_ENV_VARS, the named variables in the environment. DEPLOY_SQL_USER /
@@ -109,10 +112,6 @@ hl_load() {
 	GIT_REPO_URL="https://github.com/$GIT_REPO.git"
 	BACKUP_DIR="$GAME_CONFIG_DIR/backups"
 
-	if [[ -n "${EXTRA_ENV_YAML_FILE:-}" ]]; then
-		hl_die "EXTRA_ENV_YAML_FILE (the GUI's way of passing keys) is not supported by the holocron target yet. Put the values in the environment and list the names in EXTRA_ENV_VARS."
-	fi
-
 	local target="${HOLOCRON_SSH_TARGET:-}"
 	if [[ -z "$target" ]]; then
 		local envfile="${HOLOCRON_ENV_FILE:-$HOME/.config/kvguzzler/deploy.env}"
@@ -123,6 +122,7 @@ hl_load() {
 	[[ -n "$target" ]] || hl_die "No ssh target for the box. Set HOLOCRON_SSH_TARGET=user@host, or DEPLOY_TARGET in ~/.config/kvguzzler/deploy.env."
 	[[ "$target" =~ ^[A-Za-z0-9._@:-]+$ && "$target" != -* ]] || hl_die "The ssh target has characters this target does not accept."
 	HL_SSH_TARGET="$target"
+	HL_SSH="${HOLOCRON_SSH:-ssh}"
 	HL_SSH_OPTS=(-o BatchMode=yes -o ConnectTimeout=10 -o ServerAliveInterval=20)
 }
 
@@ -145,6 +145,7 @@ hl_prelude() {
 set -euo pipefail
 # The shared MariaDB's root login: the password comes from inside the container's own environment, never from an argument.
 msql() { sudo docker exec -i "$DBC" sh -c 'MYSQL_PWD="$MARIADB_ROOT_PASSWORD" exec mariadb -uroot "$@"' sh "$@"; }
+msqlq() { msql "$@" </dev/null; } # a query given with -e: never let docker exec wait on or swallow the caller stdin
 mdump() { sudo docker exec -i "$DBC" sh -c 'MYSQL_PWD="$MARIADB_ROOT_PASSWORD" exec mariadb-dump -uroot "$@"' sh "$@"; }
 EOF
 }
@@ -156,7 +157,7 @@ hl_remote() {
 		hl_prelude
 		printf '%s\n' "$1"
 	} | base64 | tr -d '\n')
-	ssh "${HL_SSH_OPTS[@]}" "$HL_SSH_TARGET" "bash -c \"\$(printf %s $b64 | base64 -d)\""
+	"$HL_SSH" "${HL_SSH_OPTS[@]}" "$HL_SSH_TARGET" "bash -c \"\$(printf %s $b64 | base64 -d)\""
 }
 
 ################################################################################
@@ -192,12 +193,13 @@ hl_verify_backup() {
 hl_resolve_branch() {
 	hl_divider
 	if [[ -z "${GIT_BRANCH:-}" ]]; then
-		GIT_BRANCH=$(git ls-remote --symref "$GIT_REPO_URL" HEAD | sed -n 's#^ref: refs/heads/\(.*\)\tHEAD$#\1#p')
+		# -C /: ls-remote only needs the URL; running it from inside a checkout (a git worktree seen from WSL, say) can fail on that checkout itself.
+		GIT_BRANCH=$(git -C / ls-remote --symref "$GIT_REPO_URL" HEAD | sed -n 's#^ref: refs/heads/\(.*\)\tHEAD$#\1#p')
 		[[ -n "$GIT_BRANCH" ]] || hl_die "could not determine the default branch of $GIT_REPO — set GIT_BRANCH in deploy.conf"
 		[[ "$GIT_BRANCH" =~ ^[A-Za-z0-9._/-]+$ && "$GIT_BRANCH" != -* ]] || hl_die "default branch name has characters this target does not accept: $GIT_BRANCH"
 		echo "Deploying Branch: $GIT_BRANCH (default branch of $GIT_REPO)"
 	else
-		git ls-remote --exit-code --heads "$GIT_REPO_URL" "$GIT_BRANCH" >/dev/null 2>&1 ||
+		git -C / ls-remote --exit-code --heads "$GIT_REPO_URL" "$GIT_BRANCH" >/dev/null 2>&1 ||
 			hl_die "Branch not found in $GIT_REPO: $GIT_BRANCH (fix GIT_BRANCH in games/$APP_NAME_ARG/deploy.conf, or leave it blank for the default branch)"
 		echo "Deploying Branch: $GIT_BRANCH (from deploy.conf)"
 	fi
@@ -277,6 +279,31 @@ hl_port_free_check() {
 # (newline-separated KEY=VALUE). Same naming rules as create.sh.
 hl_resolve_extra_env() {
 	HL_EXTRA_LINES=""
+	# The GUI passes the values in a 0600 YAML file instead of the environment (the
+	# same shape create.sh splices into the DigitalOcean app spec); read KEY=VALUE
+	# lines out of it. Values are double-quoted YAML scalars with \ and \" escaped.
+	if [[ -n "${EXTRA_ENV_YAML_FILE:-}" ]]; then
+		[[ -f "$EXTRA_ENV_YAML_FILE" ]] || hl_die "EXTRA_ENV_YAML_FILE not found: $EXTRA_ENV_YAML_FILE"
+		local ykey="" yline yval bs='\' dq='"'
+		while IFS= read -r yline || [[ -n "$yline" ]]; do
+			yline="${yline%$'\r'}"
+			if [[ "$yline" =~ ^"  - key: "([A-Za-z_][A-Za-z0-9_]*)$ ]]; then
+				ykey="${BASH_REMATCH[1]}"
+			elif [[ -n "$ykey" && "$yline" == '    value: "'* && "$yline" == *'"' ]]; then
+				yval="${yline#'    value: "'}"
+				yval="${yval%'"'}"
+				# Undo the YAML escaping (two backslashes -> one, backslash-quote -> quote); a placeholder
+				# keeps an escaped backslash followed by a quote from being misread.
+				yval="${yval//"$bs$bs"/$'\001'}"
+				yval="${yval//"$bs$dq"/$dq}"
+				yval="${yval//$'\001'/$bs}"
+				HL_EXTRA_LINES+="$ykey=$yval"$'\n'
+				echo "  extra env: $ykey"
+				ykey=""
+			fi
+		done < "$EXTRA_ENV_YAML_FILE"
+		return 0
+	fi
 	local list="${EXTRA_ENV_VARS:-}" token name key val
 	list="${list//,/ }"
 	[[ -n "${list// }" ]] || return 0
@@ -363,7 +390,7 @@ hl_remove_everything() {
 		set +e
 		sudo docker rm -f "$CONTAINER" >/dev/null 2>&1
 		sudo docker image ls -q "$IMAGE" | sort -u | xargs -r sudo docker image rm -f >/dev/null 2>&1
-		msql -e "DROP DATABASE IF EXISTS \`$DB\`; DROP USER IF EXISTS '"'"'$DBUSER'"'"'@'"'"'%'"'"';"
+		msqlq -e "DROP DATABASE IF EXISTS \`$DB\`; DROP USER IF EXISTS '"'"'$DBUSER'"'"'@'"'"'%'"'"';"
 		sudo rm -f "$ENVF"
 		sudo rm -rf "$GAMES_DIR/$APP"
 		echo "Removed container, images, sources, env file and database for $APP."
@@ -458,7 +485,7 @@ holocron_create() {
 	hl_remote '
 		! sudo test -e "$ENVF" || { echo "$APP already has an env file on the box: it is deployed (use redeploy.sh), or run delete.sh first." >&2; exit 20; }
 		! sudo docker container inspect "$CONTAINER" >/dev/null 2>&1 || { echo "Container $CONTAINER already exists on the box." >&2; exit 20; }
-		n=$(msql -N -e "SELECT COUNT(*) FROM information_schema.schemata WHERE schema_name = '"'"'$DB'"'"'")
+		n=$(msqlq -N -e "SELECT COUNT(*) FROM information_schema.schemata WHERE schema_name = '"'"'$DB'"'"'")
 		[ "$n" = 0 ] || { echo "Database $DB already exists in the shared MariaDB (another game or an earlier deploy). Use a different DB_NAME or run delete.sh first." >&2; exit 21; }
 	' || hl_die "Not creating: see above."
 	hl_port_free_check
@@ -551,11 +578,11 @@ holocron_delete() {
 	local present
 	present=$(hl_remote '
 		sudo docker container inspect "$CONTAINER" >/dev/null 2>&1 && echo container
-		n=$(msql -N -e "SELECT COUNT(*) FROM information_schema.schemata WHERE schema_name = '"'"'$DB'"'"'" 2>/dev/null || echo 0)
+		n=$(msqlq -N -e "SELECT COUNT(*) FROM information_schema.schemata WHERE schema_name = '"'"'$DB'"'"'" 2>/dev/null || echo 0)
 		[ "$n" = 0 ] || echo database
 		sudo test -e "$ENVF" && echo envfile
 		exit 0
-	') || hl_die "Could not reach the box."
+	' | tr -d '') || hl_die "Could not reach the box."
 	if [[ -z "$present" ]]; then
 		echo "Nothing to delete: no container, database or env file for $APP_NAME on the box."
 		exit 0
@@ -613,7 +640,7 @@ holocron_redeploy() {
 		state="unknown"
 		note=""
 		commits=""
-		latest_sha=$(git ls-remote "$latest_url" "refs/heads/$GIT_BRANCH" 2>/dev/null | cut -f 1 | head -n 1)
+		latest_sha=$(git -C / ls-remote "$latest_url" "refs/heads/$GIT_BRANCH" 2>/dev/null | cut -f 1 | head -n 1)
 		if [[ -z "$latest_sha" ]]; then
 			note="could not read branch $GIT_BRANCH"
 		elif [[ "$latest_sha" == "$deployed"* ]]; then
@@ -717,6 +744,34 @@ hl_funnel_off_if_ours() {
 			echo "Funnel port $FP turned off (it pointed at this game)."
 		fi
 	'
+}
+
+# Machine-readable state for the GUI (funnel.sh APP info): one tab-separated line,
+#   HOLOCRON_INFO  app(running|stopped|absent)  database(yes|no)  created(RFC 3339 or empty)  funnel(yes|no)  funnel-url
+# "app" is the game container; "database" is the game's database in the shared MariaDB.
+holocron_info() {
+	hl_load
+	hl_remote '
+		state=absent
+		if sudo docker container inspect "$CONTAINER" >/dev/null 2>&1; then
+			state=$(sudo docker inspect -f "{{if .State.Running}}running{{else}}stopped{{end}}" "$CONTAINER")
+		fi
+		db=no
+		n=$(msqlq -N -e "SELECT COUNT(*) FROM information_schema.schemata WHERE schema_name = '"'"'$DB'"'"'" 2>/dev/null || echo 0)
+		[ "$n" = 0 ] || db=yes
+		created=$(sudo docker inspect -f "{{.Created}}" "$CONTAINER" 2>/dev/null || true)
+		funnel=no
+		furl=
+		fs=$(sudo tailscale funnel status 2>/dev/null || true)
+		if printf "%s
+" "$fs" | grep -q "127.0.0.1:$HP"; then
+			funnel=yes
+			furl=$(printf "%s
+" "$fs" | awk -v hp="127.0.0.1:$HP" '"'"'/^https:\/\// { u = $1 } index($0, hp) { print u; exit }'"'"')
+		fi
+		printf "HOLOCRON_INFO	%s	%s	%s	%s	%s
+" "$state" "$db" "$created" "$funnel" "$furl"
+	' | tr -d ''
 }
 
 holocron_funnel() { # $1 = on|off|status

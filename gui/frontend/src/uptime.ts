@@ -53,8 +53,15 @@ export interface GameTag {
 
 // The sidebar tag for one game. status null means "not known yet", which
 // shows nothing rather than guessing "down".
-export function gameTag(hasConf: boolean, status: StatusResult | null, limitHours: number, now = Date.now()): GameTag {
+export function gameTag(
+  hasConf: boolean,
+  status: StatusResult | null,
+  limitHours: number,
+  now = Date.now(),
+  error = "",
+): GameTag {
   if (!hasConf) return { kind: "none", label: "not configured", title: "No deploy.conf yet — set it up in the Config tab." };
+  if (error) return { kind: "none", label: "unknown", title: `Couldn't read this game's status: ${error}` };
   if (!status) return { kind: "none", label: "", title: "" };
 
   const uptime = uptimeMs(status, now);
@@ -68,14 +75,20 @@ export function gameTag(hasConf: boolean, status: StatusResult | null, limitHour
         title: `Up past its ${limitHours}h limit (MAX_UPTIME_HOURS) — it's still being billed.`,
       };
     }
-    return { kind: "up", label: `deployed${age}`, title: "The app and its database droplet are both up." };
+    return {
+      kind: "up",
+      label: `deployed${age}`,
+      title: status.holocron
+        ? `The game and its database are both up on the home server${status.funnelOn ? ", and it is public through Funnel" : ""}.`
+        : "The app and its database droplet are both up.",
+    };
   }
   if (status.dropletExists || status.appExists) {
-    const only = status.dropletExists ? "database droplet" : "app";
+    const only = status.dropletExists ? (status.holocron ? "database" : "database droplet") : status.holocron ? "game container" : "app";
     return {
       kind: "partial",
       label: `partial${age}`,
-      title: `Only the ${only} exists — a deploy or teardown didn't finish. It's still being billed.`,
+      title: `Only the ${only} exists — a deploy or teardown didn't finish.${status.holocron ? "" : " It's still being billed."}`,
     };
   }
   return { kind: "down", label: "down", title: "Nothing is deployed." };
@@ -98,5 +111,5 @@ export function tagForGame(game: string, now = Date.now()): GameTag {
   }
   const entry = state.gameStatuses.find((g) => g.game === game);
   if (!entry) return { kind: "none", label: "", title: "" };
-  return gameTag(entry.hasConf, entry.hasConf ? entry.status : null, entry.maxUptimeHours, now);
+  return gameTag(entry.hasConf, entry.hasConf ? entry.status : null, entry.maxUptimeHours, now, entry.error ?? "");
 }

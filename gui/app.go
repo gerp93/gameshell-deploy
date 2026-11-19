@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
@@ -15,6 +16,7 @@ import (
 	"github.com/gerp93/KVG_Standards/packages/go/kvgupdate"
 
 	"gameshell-deploy-gui/deployconf"
+	"gameshell-deploy-gui/holocron"
 	"gameshell-deploy-gui/platform"
 	"gameshell-deploy-gui/preflight"
 	"gameshell-deploy-gui/scriptrunner"
@@ -229,12 +231,12 @@ func (a *App) RenameGame(opsDir, oldName, newName string) error {
 		return err
 	}
 	if confResult.Found {
-		status, err := scriptrunner.CheckStatus(confResult.Conf.AppName)
+		status, err := a.gameStatus(opsDir, oldName, confResult.Conf)
 		if err != nil {
-			return fmt.Errorf("could not verify Digital Ocean status before renaming: %w", err)
+			return fmt.Errorf("could not verify the deployment's status before renaming: %w", err)
 		}
 		if status.DropletExists || status.AppExists {
-			return fmt.Errorf("%s still has a droplet/app on Digital Ocean — tear it down before renaming", oldName)
+			return fmt.Errorf("%s is still deployed (a droplet/app on Digital Ocean, or its container/database on the home server) — tear it down before renaming", oldName)
 		}
 	}
 
@@ -255,12 +257,12 @@ func (a *App) DeleteGame(opsDir, appName string) error {
 		return err
 	}
 	if confResult.Found {
-		status, err := scriptrunner.CheckStatus(confResult.Conf.AppName)
+		status, err := a.gameStatus(opsDir, appName, confResult.Conf)
 		if err != nil {
-			return fmt.Errorf("could not verify Digital Ocean status before deleting: %w", err)
+			return fmt.Errorf("could not verify the deployment's status before deleting: %w", err)
 		}
 		if status.DropletExists || status.AppExists {
-			return fmt.Errorf("%s still has a droplet/app on Digital Ocean — tear it down first", appName)
+			return fmt.Errorf("%s is still deployed (a droplet/app on Digital Ocean, or its container/database on the home server) — tear it down first", appName)
 		}
 	}
 	return os.RemoveAll(gameConfigDir(opsDir, appName))
@@ -437,6 +439,71 @@ func (a *App) OpenURL(rawURL string) error {
 	return platform.OpenURL(rawURL)
 }
 
+// scriptEnvFor is the extra environment a script run needs for game: the home
+// server's address and ssh program for a TARGET=holocron game, nothing for a
+// DigitalOcean one (or a game without a deploy.conf).
+func (a *App) scriptEnvFor(opsDir, game string) ([]string, error) {
+	res, err := a.LoadDeployConf(opsDir, game)
+	if err != nil || !res.Found || !res.Conf.IsHolocron() {
+		return nil, nil
+	}
+	return holocron.ScriptEnv()
+}
+
+// holocronLANURL is the address a home-server game is reachable at on the home
+// network, or "" when it is published on the box itself only.
+func holocronLANURL(conf deployconf.DeployConf) string {
+	if strings.TrimSpace(conf.HolocronBind) != "0.0.0.0" || strings.TrimSpace(conf.HolocronHostPort) == "" {
+		return ""
+	}
+	target, err := holocron.SSHTarget()
+	if err != nil {
+		return ""
+	}
+	return "http://" + holocron.Host(target) + ":" + strings.TrimSpace(conf.HolocronHostPort)
+}
+
+// gameStatus reads a game's deployed state from wherever it runs: Digital Ocean
+// (by its APP_NAME) or the home server (asking funnel.sh). game is the games/
+// directory name.
+func (a *App) gameStatus(opsDir, game string, conf deployconf.DeployConf) (scriptrunner.StatusResult, error) {
+	if !conf.IsHolocron() {
+		return scriptrunner.CheckStatus(conf.AppName)
+	}
+	info, err := scriptrunner.CheckHolocron(opsDir, game)
+	if err != nil {
+		return scriptrunner.StatusResult{}, err
+	}
+	return info.StatusResult(holocronLANURL(conf)), nil
+}
+
+// CheckGameStatus is CheckStatus for the games/ directory name, so it works for
+// games on either target. A game without a deploy.conf reports nothing deployed.
+func (a *App) CheckGameStatus(opsDir, game string) (scriptrunner.StatusResult, error) {
+	res, err := a.LoadDeployConf(opsDir, game)
+	if err != nil {
+		return scriptrunner.StatusResult{}, err
+	}
+	if !res.Found {
+		return scriptrunner.StatusResult{}, nil
+	}
+	return a.gameStatus(opsDir, game, res.Conf)
+}
+
+// RunFunnel turns Tailscale Funnel on or off for a home-server game (or reports
+// it). "on" publishes the game on the internet; the frontend asks the operator
+// first. Returns the script's output.
+func (a *App) RunFunnel(opsDir, game, action string) (string, error) {
+	res, err := a.LoadDeployConf(opsDir, game)
+	if err != nil {
+		return "", err
+	}
+	if !res.Found || !res.Conf.IsHolocron() {
+		return "", fmt.Errorf("%s does not run on the home server", game)
+	}
+	return scriptrunner.RunFunnel(opsDir, game, action)
+}
+
 // CheckStatus reports whether appName (deploy.conf's APP_NAME) already has a
 // droplet/app on Digital Ocean, so the frontend knows whether it's set up
 // for a Deploy or a Teardown.
@@ -444,25 +511,77 @@ func (a *App) CheckStatus(appName string) (scriptrunner.StatusResult, error) {
 	return scriptrunner.CheckStatus(appName)
 }
 
-// ListGameStatuses returns the Digital Ocean status of every listed game
-// (names from ListGames) for the sidebar, from one pair of doctl calls. Each
-// game's APP_NAME and MAX_UPTIME_HOURS come from its own deploy.conf; a game
-// without one is reported with HasConf false rather than failing the batch.
+// ListGameStatuses returns the deployed state of every listed game (names from
+// ListGames) for the sidebar. Digital Ocean games are answered from one pair of
+// doctl calls; each home-server game asks the box (in parallel). Each game's
+// APP_NAME and MAX_UPTIME_HOURS come from its own deploy.conf; a game without
+// one is reported with HasConf false rather than failing the batch, and a home
+// server that can't be reached marks just those games with an Error.
 func (a *App) ListGameStatuses(opsDir string, games []string) ([]scriptrunner.GameStatus, error) {
-	refs := make([]scriptrunner.GameRef, 0, len(games))
+	doRefs := make([]scriptrunner.GameRef, 0, len(games))
+	holocronGames := map[string]deployconf.DeployConf{}
 	for _, game := range games {
 		ref := scriptrunner.GameRef{Game: game}
 		path := filepath.Join(gameConfigDir(opsDir, game), "deploy.conf")
 		if deployconf.Exists(path) {
 			if conf, err := deployconf.Load(path); err == nil && conf.AppName != "" {
+				if conf.IsHolocron() {
+					holocronGames[game] = conf
+					continue
+				}
 				ref.HasConf = true
 				ref.AppName = conf.AppName
 				ref.MaxUptimeHours = conf.MaxUptime()
 			}
 		}
-		refs = append(refs, ref)
+		doRefs = append(doRefs, ref)
 	}
-	return scriptrunner.ListGameStatuses(refs)
+
+	// Digital Ocean is only asked about when some game lives there, so a setup
+	// that is all home-server games never needs doctl for the sidebar.
+	doStatuses := map[string]scriptrunner.GameStatus{}
+	if len(doRefs) > 0 {
+		list, err := scriptrunner.ListGameStatuses(doRefs)
+		if err != nil && len(holocronGames) == 0 {
+			return nil, err
+		}
+		for _, gs := range list {
+			doStatuses[gs.Game] = gs
+		}
+	}
+
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	holocronStatuses := map[string]scriptrunner.GameStatus{}
+	for game, conf := range holocronGames {
+		wg.Add(1)
+		go func(game string, conf deployconf.DeployConf) {
+			defer wg.Done()
+			gs := scriptrunner.GameStatus{Game: game, HasConf: true, MaxUptimeHours: conf.MaxUptime()}
+			info, err := scriptrunner.CheckHolocron(opsDir, game)
+			if err != nil {
+				gs.Error = err.Error()
+			} else {
+				gs.Status = info.StatusResult(holocronLANURL(conf))
+			}
+			mu.Lock()
+			holocronStatuses[game] = gs
+			mu.Unlock()
+		}(game, conf)
+	}
+	wg.Wait()
+
+	out := make([]scriptrunner.GameStatus, 0, len(games))
+	for _, game := range games {
+		if gs, ok := holocronStatuses[game]; ok {
+			out = append(out, gs)
+		} else if gs, ok := doStatuses[game]; ok {
+			out = append(out, gs)
+		} else {
+			out = append(out, scriptrunner.GameStatus{Game: game})
+		}
+	}
+	return out, nil
 }
 
 // GetBalance returns the Digital Ocean account's month-to-date usage, for the
@@ -476,6 +595,12 @@ func (a *App) GetBalance() (scriptrunner.BalanceResult, error) {
 // events (see scriptrunner.RunCreate).
 func (a *App) RunCreate(req scriptrunner.CreateRequest) {
 	go func() {
+		env, err := a.scriptEnvFor(req.OpsDir, req.AppName)
+		if err != nil {
+			wailsEmitter{ctx: a.ctx}.EmitExit("create:exit", scriptrunner.ExitInfo{AppName: req.AppName, Code: -1, Err: err.Error()})
+			return
+		}
+		req.ScriptEnv = env
 		_ = scriptrunner.RunCreate(req, wailsEmitter{ctx: a.ctx})
 	}()
 }
@@ -485,6 +610,12 @@ func (a *App) RunCreate(req scriptrunner.CreateRequest) {
 // events (see scriptrunner.RunDelete).
 func (a *App) RunDelete(req scriptrunner.DeleteRequest) {
 	go func() {
+		env, err := a.scriptEnvFor(req.OpsDir, req.AppName)
+		if err != nil {
+			wailsEmitter{ctx: a.ctx}.EmitExit("delete:exit", scriptrunner.ExitInfo{AppName: req.AppName, Code: -1, Err: err.Error()})
+			return
+		}
+		req.ScriptEnv = env
 		_ = scriptrunner.RunDelete(req, wailsEmitter{ctx: a.ctx})
 	}()
 }
@@ -494,6 +625,12 @@ func (a *App) RunDelete(req scriptrunner.DeleteRequest) {
 // events (see scriptrunner.RunRedeploy).
 func (a *App) RunRedeploy(req scriptrunner.RedeployRequest) {
 	go func() {
+		env, err := a.scriptEnvFor(req.OpsDir, req.AppName)
+		if err != nil {
+			wailsEmitter{ctx: a.ctx}.EmitExit("redeploy:exit", scriptrunner.ExitInfo{AppName: req.AppName, Code: -1, Err: err.Error()})
+			return
+		}
+		req.ScriptEnv = env
 		_ = scriptrunner.RunRedeploy(req, wailsEmitter{ctx: a.ctx})
 	}()
 }
@@ -502,7 +639,11 @@ func (a *App) RunRedeploy(req scriptrunner.RedeployRequest) {
 // its branch that isn't deployed yet, plus any destructive SQL in it, so the
 // GUI can offer a redeploy proactively.
 func (a *App) CheckRedeploy(opsDir, appName string) (scriptrunner.RedeployCheck, error) {
-	return scriptrunner.CheckRedeploy(opsDir, appName)
+	env, err := a.scriptEnvFor(opsDir, appName)
+	if err != nil {
+		return scriptrunner.RedeployCheck{}, err
+	}
+	return scriptrunner.CheckRedeploy(opsDir, appName, env)
 }
 
 // CancelRun kills the running script for appName, if any. It does not clean

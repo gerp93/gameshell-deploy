@@ -8,6 +8,7 @@ import { createTeardownPanel } from "./teardownPanel";
 import { createRedeployPanel } from "./redeployPanel";
 import { createCodeBanner } from "./codeBanner";
 import { createManageSwitch } from "./manageSwitch";
+import { createFunnelPanel } from "./funnelPanel";
 import { startCodeCheckPolling } from "./codeCheck";
 import { createTabs } from "./tabs";
 import { createThemeSwitcher } from "./themeSwitcher";
@@ -103,11 +104,12 @@ const teardown = createTeardownPanel();
 const redeploy = createRedeployPanel();
 const codeBanner = createCodeBanner();
 const manageSwitch = createManageSwitch();
+const funnel = createFunnelPanel();
 
 // A deployed game picks Redeploy or Teardown with the switch on top; only the
 // chosen form is shown, so the two sets of fields are never conflated.
 const actionTabContent = document.createElement("div");
-actionTabContent.append(manageSwitch.el, deploy.el, redeploy.el, teardown.el);
+actionTabContent.append(manageSwitch.el, deploy.el, redeploy.el, teardown.el, funnel.el);
 
 const tabs = createTabs(
   [
@@ -183,4 +185,5 @@ subscribe(() => {
   deploy.render();
   redeploy.render();
   teardown.render();
+  funnel.render();
 });

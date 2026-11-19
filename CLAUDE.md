@@ -45,6 +45,9 @@ game public. Rules that keep it safe and the DigitalOcean path untouched:
 - Every value that reaches a remote shell script is validated against a strict pattern in `hl_load` first. Remote scripts are
   sent as base64 (`hl_remote`), never as quoted one-liners.
 - Never put Immich (port 2283) or housed (8080) behind a game's host port or Funnel; `hl_load` rejects those ports.
+- The GUI drives this target through the same scripts (`gui/holocron/`, `gui/scriptrunner/holocron.go`): it only adds the target
+  settings to the config form, passes `HOLOCRON_SSH_TARGET`/`HOLOCRON_SSH` as environment (WSL has no key for the box, so on Windows
+  the scripts use `ssh.exe`), and reads state through `funnel.sh APP info`. Keep that line (`HOLOCRON_INFO`) stable.
 - A decrypted backup never lands on this PC's disk: restore pipes `gpg -d` into `mariadb`, a dump is checked on the box and
   streamed through `gpg -c`. Keep the five dump checks and the final decrypt-and-check of the new `.gpg`.
 
