@@ -240,6 +240,23 @@ source "$CONFIG_PATH"
 : "${HTTP_PORT:?deploy.conf must set HTTP_PORT}"
 : "${GIT_REPO:?deploy.conf must set GIT_REPO}"
 
+################################################################################
+# deploy target
+#
+# TARGET in deploy.conf picks where the game runs: "digitalocean" (the default,
+# everything below) or "holocron" (the home server, see targets/holocron.sh).
+# Left unset, nothing below this block changes.
+
+TARGET="${TARGET:-digitalocean}"
+if [[ "$TARGET" == "holocron" ]]; then
+	# shellcheck source=targets/holocron.sh
+	source "$OPS_DIR/targets/holocron.sh"
+	holocron_create
+elif [[ "$TARGET" != "digitalocean" ]]; then
+	echo "Unknown TARGET in $CONFIG_PATH: $TARGET (use digitalocean or holocron)"
+	exit 1
+fi
+
 # Optional: space-separated env var names copied from the operator's
 # environment onto the DO app. Empty means SQL creds only.
 EXTRA_ENV_VARS="${EXTRA_ENV_VARS:-}"

@@ -126,6 +126,23 @@ source "$CONFIG_PATH"
 : "${APP_NAME:?deploy.conf must set APP_NAME}"
 : "${DB_NAME:?deploy.conf must set DB_NAME}"
 
+################################################################################
+# deploy target
+#
+# TARGET in deploy.conf picks where the game runs: "digitalocean" (the default,
+# everything below) or "holocron" (the home server, see targets/holocron.sh).
+# Left unset, nothing below this block changes.
+
+TARGET="${TARGET:-digitalocean}"
+if [[ "$TARGET" == "holocron" ]]; then
+	# shellcheck source=targets/holocron.sh
+	source "$OPS_DIR/targets/holocron.sh"
+	holocron_delete
+elif [[ "$TARGET" != "digitalocean" ]]; then
+	echo "Unknown TARGET in $CONFIG_PATH: $TARGET (use digitalocean or holocron)"
+	exit 1
+fi
+
 DROPLET_NAME="$APP_NAME-database"
 BACKUP_DIR="$GAME_CONFIG_DIR/backups"
 SSH_IDENTITY_TEMP=""

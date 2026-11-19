@@ -70,3 +70,19 @@ DROPLET_SIZE=s-1vcpu-1gb-amd
 # tear it down — it is a reminder only and never tears anything down itself.
 # Whole hours, 1 or more; leave blank for no limit. create.sh ignores it.
 MAX_UPTIME_HOURS=
+
+# Optional: where the game runs. Leave unset (or "digitalocean") for the
+# DigitalOcean app + database droplet above. "holocron" runs it on the always-on
+# home server instead (Docker; see targets/holocron.sh and the README). The
+# droplet values above are then unused; these apply instead:
+#TARGET=holocron
+# Port on the box the game is published on. One per game; not 2283 (Immich) or 8080.
+#HOLOCRON_HOST_PORT=12016
+# Tailscale Funnel port (443, 8443 or 10000: the only ports Funnel allows, one game each).
+# Only used by ./funnel.sh; create.sh never makes a game public.
+#HOLOCRON_FUNNEL_PORT=8443
+# 127.0.0.1 (default: only reachable through Funnel/ssh) or 0.0.0.0 (also on the LAN and tailnet).
+#HOLOCRON_BIND=127.0.0.1
+# Resource limits for the game container (defaults shown).
+#HOLOCRON_CPUS=1
+#HOLOCRON_MEMORY=512m
