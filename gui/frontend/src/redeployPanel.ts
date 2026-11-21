@@ -3,7 +3,7 @@ import { createLogPane } from "./logPane";
 import { refreshStatus } from "./appPanel";
 import { commitsText, shortSha } from "./codeBanner";
 import { currentCodeCheck, refreshCodeCheck } from "./codeCheck";
-import { state, preflightPassed, isGameRunning, getGameRun, clearGameRun, manageMode, notify } from "./state";
+import { isHolocronGame, state, preflightPassed, isGameRunning, getGameRun, clearGameRun, manageMode, notify } from "./state";
 import { createRunSummary } from "./runSummary";
 import { createSecretField } from "./secretField";
 import { createRememberCheckbox } from "./rememberCheckbox";
@@ -16,12 +16,13 @@ export function createRedeployPanel(): { el: HTMLElement; render: () => void } {
   const el = document.createElement("div");
   el.className = "redeploy-panel";
 
-  const intro = document.createElement("p");
-  intro.className = "hint";
-  intro.textContent =
+  const DO_INTRO =
     "Builds the latest commit of the branch and rolls it out to the running app. The database droplet isn't touched; " +
     "the game migrates its own schema on startup, and if the new build fails to start the previous one keeps serving. " +
     "Env vars, app size and branch stay as they were deployed.";
+  const intro = document.createElement("p");
+  intro.className = "hint";
+  intro.textContent = DO_INTRO;
 
   // --- is there new code? ---------------------------------------------------
 
@@ -167,7 +168,7 @@ export function createRedeployPanel(): { el: HTMLElement; render: () => void } {
 
   function applyGPGVisibility() {
     const show = backupYes.checked;
-    sshKeyWrap.style.display = show ? "" : "none";
+    sshKeyWrap.style.display = show && !isHolocronGame() ? "" : "none";
     gpgPassphraseWrap.style.display = show ? "" : "none";
     gpgConfirmWrap.style.display = show ? "" : "none";
     remember.el.style.display = show ? "" : "none";
@@ -280,12 +281,17 @@ export function createRedeployPanel(): { el: HTMLElement; render: () => void } {
       ["Back up database first", backup === "yes" ? "yes" : "no"],
       ...(backup === "yes"
         ? [
-            ["SSH key", sshKeyName] as [string, string],
+            ...(isHolocronGame() ? [] : [["SSH key", sshKeyName] as [string, string]]),
             ["GPG_PASSPHRASE", setMark(gpgPassphrase)] as [string, string],
           ]
         : []),
       ["Full rebuild", forceRebuild ? "yes (no build cache)" : "no (reuse build cache)"],
-      ["App spec", "unchanged (env vars, app size, branch stay as deployed)"],
+      [
+        isHolocronGame() ? "Container settings" : "App spec",
+        isHolocronGame()
+          ? "unchanged (env file, ports and limits stay as deployed)"
+          : "unchanged (env vars, app size, branch stay as deployed)",
+      ],
     ];
     redeployButton.disabled = true;
     const s = await loadSettings();
@@ -311,7 +317,7 @@ export function createRedeployPanel(): { el: HTMLElement; render: () => void } {
       opsDir: state.opsDir,
       appName,
       backup,
-      sshKeyName: backup === "yes" ? sshKeyName : "",
+      sshKeyName: backup === "yes" && !isHolocronGame() ? sshKeyName : "",
       gpgPassphrase,
       forceRebuild,
     });
@@ -427,10 +433,19 @@ export function createRedeployPanel(): { el: HTMLElement; render: () => void } {
     const checking = state.codeCheck?.appName === state.appName && state.codeCheck.checking;
     checkButton.disabled = Boolean(checking);
 
+    intro.textContent = isHolocronGame()
+      ? "Builds the latest commit of the branch on the home server and swaps the running container for it (a few seconds of downtime). " +
+        "The database isn't touched; the game migrates its own schema on startup, and if the new version doesn't answer the previous one is put back. " +
+        "The env file, ports and limits stay as they were deployed."
+      : DO_INTRO;
+    forceRebuildLabel.lastChild!.textContent = isHolocronGame()
+      ? " Force a full rebuild (ignore Docker's build cache)"
+      : " Force a full rebuild (ignore App Platform's build cache)";
+
     if (!running) {
       applyGPGVisibility();
       void fillGPGFromKeyring();
-      if (state.opsDir && keysLoadedForOpsDir !== state.opsDir) {
+      if (!isHolocronGame() && state.opsDir && keysLoadedForOpsDir !== state.opsDir) {
         keysLoadedForOpsDir = state.opsDir;
         void refreshKeys();
       }
@@ -441,7 +456,7 @@ export function createRedeployPanel(): { el: HTMLElement; render: () => void } {
     // operator is watching just because the (hidden) form beneath it isn't ready.
     el.dataset.disabled = !running && !ready ? "true" : "false";
     const mismatch = gpgMismatch();
-    const missingKey = backupYes.checked && !sshKeySelect.value;
+    const missingKey = backupYes.checked && !isHolocronGame() && !sshKeySelect.value;
     const unacknowledged = needsAck && !ackCheck.checked;
     redeployButton.disabled = !ready || running || mismatch || missingKey || unacknowledged;
     gpgMismatchWarning.textContent = mismatch ? "GPG_PASSPHRASE and its confirmation don't match." : "";

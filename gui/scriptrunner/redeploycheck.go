@@ -48,9 +48,12 @@ type RedeployCheck struct {
 // directory name, as for RunRedeploy. Reusing the shell logic here instead of
 // re-implementing the git/doctl comparison in Go keeps the GUI and CLI from
 // silently drifting apart, same as ListAvailableTiers.
-func CheckRedeploy(opsDir, appName string) (RedeployCheck, error) {
+//
+// env is extra KEY=VALUE environment for the script (the home-server settings
+// for a TARGET=holocron game); nil for DigitalOcean games.
+func CheckRedeploy(opsDir, appName string, env []string) (RedeployCheck, error) {
 	scriptPath := filepath.Join(opsDir, "redeploy.sh")
-	cmd, err := platform.ScriptCommand(scriptPath, []string{appName, "--check"}, nil)
+	cmd, err := platform.ScriptCommand(scriptPath, []string{appName, "--check"}, env)
 	if err != nil {
 		return RedeployCheck{}, err
 	}

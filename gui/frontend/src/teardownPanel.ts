@@ -5,6 +5,7 @@ import {
   state,
   preflightPassed,
   isDeployed,
+  isHolocronGame,
   isGameRunning,
   hasFailedExit,
   getGameRun,
@@ -18,7 +19,10 @@ import { createRememberCheckbox } from "./rememberCheckbox";
 
 export function createTeardownPanel(): { el: HTMLElement; render: () => void } {
   const el = document.createElement("div");
-  el.innerHTML = `<p class="hint">Deletes the droplet and app for this game.</p>`;
+  // Worded per target in render() below.
+  const introHint = document.createElement("p");
+  introHint.className = "hint";
+  el.appendChild(introHint);
 
   const leftoverHint = document.createElement("p");
   leftoverHint.className = "hint";
@@ -151,7 +155,14 @@ export function createTeardownPanel(): { el: HTMLElement; render: () => void } {
       // state for a few seconds (DO API eventual consistency). Only a
       // failure (partial/unknown state) needs a real re-check.
       if (info.code === 0) {
-        state.status = { dropletExists: false, appExists: false, appURL: "", upSince: "" };
+        state.status = {
+          dropletExists: false,
+          appExists: false,
+          appURL: "",
+          upSince: "",
+          holocron: isHolocronGame(),
+          funnelOn: false,
+        };
         // Whatever gets deployed next should open on Redeploy, not Teardown.
         state.manageMode = "redeploy";
         // A *successful* prior deploy's history is now stale — leaving it in
@@ -190,7 +201,7 @@ export function createTeardownPanel(): { el: HTMLElement; render: () => void } {
     run.running = true;
     run.params = [
       ["Back up database first", backup === "yes" ? "yes" : "no"],
-      ...(backup === "yes" ? [["SSH key", sshKeyName] as [string, string]] : []),
+      ...(backup === "yes" && !isHolocronGame() ? [["SSH key", sshKeyName] as [string, string]] : []),
     ];
     teardownButton.disabled = true;
     const s = await loadSettings();
@@ -216,7 +227,7 @@ export function createTeardownPanel(): { el: HTMLElement; render: () => void } {
       opsDir: state.opsDir,
       appName,
       backup,
-      sshKeyName: backup === "yes" ? sshKeyName : "",
+      sshKeyName: backup === "yes" && !isHolocronGame() ? sshKeyName : "",
       gpgPassphrase,
     });
   };
@@ -280,7 +291,8 @@ export function createTeardownPanel(): { el: HTMLElement; render: () => void } {
   // recursing back into render().
   function applyGPGVisibility() {
     const show = backupYes.checked;
-    sshKeyWrap.style.display = show ? "" : "none";
+    // The DigitalOcean ssh key only matters for a droplet; the home server uses this PC's own key.
+    sshKeyWrap.style.display = show && !isHolocronGame() ? "" : "none";
     gpgPassphraseWrap.style.display = show ? "" : "none";
     gpgConfirmWrap.style.display = show ? "" : "none";
     remember.el.style.display = show ? "" : "none";
@@ -321,9 +333,14 @@ export function createTeardownPanel(): { el: HTMLElement; render: () => void } {
     if (!show) return;
 
     remember.sync(state.appName);
+    introHint.textContent = isHolocronGame()
+      ? "Backs up the database (if you ask), then removes this game from the home server: its container, database and files. Games on Funnel are taken off the internet first."
+      : "Deletes the droplet and app for this game.";
     logPane.showGame(state.appName);
     leftoverHint.textContent =
-      hasFailedExit("create", state.appName) && isDeployed() === true
+      hasFailedExit("create", state.appName) && isDeployed() === true && isHolocronGame()
+        ? "Deploy failed partway. The deploy log is above — teardown when you're ready to clean up what it left on the home server."
+        : hasFailedExit("create", state.appName) && isDeployed() === true
         ? "Deploy failed after creating cloud resources. The deploy log is above — teardown when you're ready to clean up. If SSH backup fails with Permission denied, skip the backup: a mangled SSH key at create time can leave the droplet with no usable key."
         : "";
     leftoverHint.style.display = leftoverHint.textContent ? "" : "none";
@@ -332,7 +349,7 @@ export function createTeardownPanel(): { el: HTMLElement; render: () => void } {
     if (!running) {
       applyGPGVisibility();
       void fillGPGFromKeyring();
-      if (state.opsDir && keysLoadedForOpsDir !== state.opsDir) {
+      if (!isHolocronGame() && state.opsDir && keysLoadedForOpsDir !== state.opsDir) {
         keysLoadedForOpsDir = state.opsDir;
         void refreshKeys();
       }
@@ -344,7 +361,7 @@ export function createTeardownPanel(): { el: HTMLElement; render: () => void } {
     // ready — only applies while the form itself is actually shown.
     el.dataset.disabled = !running && !ready ? "true" : "false";
     const mismatch = gpgMismatch();
-    const missingKey = backupYes.checked && !sshKeySelect.value;
+    const missingKey = backupYes.checked && !isHolocronGame() && !sshKeySelect.value;
     teardownButton.disabled = !ready || running || mismatch || missingKey;
     gpgMismatchWarning.textContent = mismatch ? "GPG_PASSPHRASE and its confirmation don't match." : "";
     status.textContent = preflightPassed() ? "" : "Fix the failing Prerequisites checks above before tearing down.";

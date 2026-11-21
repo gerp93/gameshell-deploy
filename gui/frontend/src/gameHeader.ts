@@ -241,7 +241,9 @@ export function createGameHeader(): { el: HTMLElement; render: () => void } {
       up === null ? "" : over ? `⚠ Up ${formatDuration(up)} — over your ${limit}h limit` : `Up ${formatDuration(up)}`;
     uptime.title = over
       ? "Still being billed. Tear it down in the Manage tab, or raise MAX_UPTIME_HOURS in Config."
-      : "Time since the droplet/app was created, per Digital Ocean. A redeploy doesn't reset it.";
+      : status?.holocron
+        ? "Time since the game's container was created on the home server. A redeploy doesn't reset it."
+        : "Time since the droplet/app was created, per Digital Ocean. A redeploy doesn't reset it.";
 
     const appURL = state.status?.appURL ?? "";
     openAppButton.style.display = appURL ? "" : "none";

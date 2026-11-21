@@ -28,6 +28,29 @@ Target platform: **Digital Ocean** (`doctl` for both a MariaDB droplet and a
 DO App Platform app), driven from a **Linux/macOS shell** (`bash`). GPG
 encrypts database backups at rest.
 
+## The "holocron" target (optional second target)
+
+`deploy.conf` may set `TARGET=holocron` to run a game on the user's always-on home server (Docker, shared MariaDB container
+from the Holocron repo, Tailscale Funnel for public access) instead of DigitalOcean. `create.sh`/`delete.sh`/`redeploy.sh`
+dispatch to [targets/holocron.sh](targets/holocron.sh) right after loading the config; `funnel.sh` is the only thing that makes a
+game public. Rules that keep it safe and the DigitalOcean path untouched:
+
+- Without `TARGET` (or `TARGET=digitalocean`) nothing in `targets/` is read: the DO code below the dispatch block is unchanged.
+  Don't "unify" the two paths.
+- Same process/config/data split: no game names in `targets/holocron.sh`; per-game values (`HOLOCRON_HOST_PORT`,
+  `HOLOCRON_FUNNEL_PORT`, ...) live in `deploy.conf`.
+- The box's ssh address is never written in this repo (`HOLOCRON_SSH_TARGET` or `DEPLOY_TARGET` in
+  `~/.config/kvguzzler/deploy.env`). Secrets (generated database password, extra API keys) go over ssh stdin or are generated on
+  the box and never appear on a command line, in a log or in git.
+- Every value that reaches a remote shell script is validated against a strict pattern in `hl_load` first. Remote scripts are
+  sent as base64 (`hl_remote`), never as quoted one-liners.
+- Never put Immich (port 2283) or housed (8080) behind a game's host port or Funnel; `hl_load` rejects those ports.
+- The GUI drives this target through the same scripts (`gui/holocron/`, `gui/scriptrunner/holocron.go`): it only adds the target
+  settings to the config form, passes `HOLOCRON_SSH_TARGET`/`HOLOCRON_SSH` as environment (WSL has no key for the box, so on Windows
+  the scripts use `ssh.exe`), and reads state through `funnel.sh APP info`. Keep that line (`HOLOCRON_INFO`) stable.
+- A decrypted backup never lands on this PC's disk: restore pipes `gpg -d` into `mariadb`, a dump is checked on the box and
+  streamed through `gpg -c`. Keep the five dump checks and the final decrypt-and-check of the new `.gpg`.
+
 ## The process/config/data split (must not blur)
 
 - **Process** (this repo, generic): `create.sh`, `delete.sh`, `redeploy.sh`,

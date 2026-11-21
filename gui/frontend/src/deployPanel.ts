@@ -18,14 +18,17 @@ import {
 } from "./api";
 import { createLogPane } from "./logPane";
 import { refreshStatus, scheduleStatusReconcile } from "./appPanel";
-import { state, preflightPassed, isDeployed, isGameRunning, hasFailedExit, hasCreateLog, getGameRun, clearGameRun, notify } from "./state";
+import { state, preflightPassed, isHolocronGame, isDeployed, isGameRunning, hasFailedExit, hasCreateLog, getGameRun, clearGameRun, notify } from "./state";
 import { createRunSummary } from "./runSummary";
 import { resolveExtraEnvNames } from "./extraEnv";
 import { createSecretField, type SecretField } from "./secretField";
 
 export function createDeployPanel(): { el: HTMLElement; render: () => void } {
   const el = document.createElement("div");
-  el.innerHTML = `<p class="hint">Creates the droplet + app for this game, restoring the latest backup if one exists.</p>`;
+  // Worded per target in render() below.
+  const introHint = document.createElement("p");
+  introHint.className = "hint";
+  el.appendChild(introHint);
 
   const sshKeyWrap = document.createElement("div");
   sshKeyWrap.className = "field";
@@ -384,6 +387,8 @@ export function createDeployPanel(): { el: HTMLElement; render: () => void } {
         state.status = {
           dropletExists: true,
           appExists: true,
+          holocron: state.status?.holocron ?? isHolocronGame(),
+          funnelOn: state.status?.funnelOn ?? false,
           appURL: state.status?.appURL ?? "",
           // A fresh deploy starts the clock now; the reconcile a few seconds
           // later replaces this with Digital Ocean's own creation time.
@@ -457,21 +462,29 @@ export function createDeployPanel(): { el: HTMLElement; render: () => void } {
     // its value) — so a run in progress shows exactly what it's running with.
     const conf = state.deployConf;
     const setMark = (value: string) => (value ? "✓ set" : "✗ not set");
+    const holocron = isHolocronGame();
+    const doOnly = <T>(rows: T[]): T[] => (holocron ? [] : rows);
     run.params = [
       ["App name", conf?.appName || appName],
+      ["Runs on", holocron ? "home server (holocron)" : "Digital Ocean"],
       ["Git repo", conf?.gitRepo || "—"],
       ["Git branch", conf?.gitBranch || "repo default"],
       ...(conf?.gitUpstream ? [["Upstream", conf.gitUpstream] as [string, string]] : []),
       ["Env var prefix", conf?.envVarPrefix || "—"],
       ["Database", conf?.dbName || "—"],
       ["HTTP port", conf?.httpPort || "—"],
-      ["Droplet image", conf?.dropletImage || "default"],
-      ["SSH key", sshKeyName],
-      ["Region", regionSelect.value],
-      ["Price tier", tierInputs.find((i) => i.checked)?.parentElement?.textContent?.trim() ?? tier],
+      ...(holocron ? [["Host port", conf?.holocronHostPort || "—"] as [string, string]] : []),
+      ...doOnly([
+        ["Droplet image", conf?.dropletImage || "default"] as [string, string],
+        ["SSH key", sshKeyName] as [string, string],
+        ["Region", regionSelect.value] as [string, string],
+        ["Price tier", tierInputs.find((i) => i.checked)?.parentElement?.textContent?.trim() ?? tier] as [string, string],
+      ]),
       ["Restore backup", restoring],
-      ["DEPLOY_SQL_USER", setMark(sqlUser)],
-      ["DEPLOY_SQL_PASSWORD", setMark(sqlPassword)],
+      ...doOnly([
+        ["DEPLOY_SQL_USER", setMark(sqlUser)] as [string, string],
+        ["DEPLOY_SQL_PASSWORD", setMark(sqlPassword)] as [string, string],
+      ]),
       ["GPG_PASSPHRASE", setMark(gpgPassphrase)],
       ...extraEnv.map(({ key, value }) => [key, setMark(value)] as [string, string]),
     ];
@@ -689,6 +702,14 @@ export function createDeployPanel(): { el: HTMLElement; render: () => void } {
   }
 
   function formFilled(): boolean {
+    // A home-server game needs no droplet tier, DigitalOcean ssh key or database
+    // user (the box makes its own database password): only the extra keys.
+    if (isHolocronGame()) {
+      for (const field of extraEnvFields.values()) {
+        if (field.input.value.trim() === "") return false;
+      }
+      return true;
+    }
     const tierChosen = tierInputs.some((i) => i.checked);
     if (
       !tierChosen ||
@@ -726,6 +747,10 @@ export function createDeployPanel(): { el: HTMLElement; render: () => void } {
     el.style.display = show ? "" : "none";
     if (!show) return;
 
+    const holocron = isHolocronGame();
+    introHint.textContent = holocron
+      ? "Builds this game on the home server and starts it, restoring the latest backup if one exists. It stays private until you turn Funnel on (Manage tab)."
+      : "Creates the droplet + app for this game, restoring the latest backup if one exists.";
     logPane.showGame(state.appName);
     runSummary.render(state.appName, { running: "Deploying", done: "Deployed" });
     rebuildExtraEnvFields();
@@ -740,15 +765,23 @@ export function createDeployPanel(): { el: HTMLElement; render: () => void } {
     const resolved = failedCreate && !deployed;
     const hideForm = running || (deployed && !failedCreate) || resolved;
     for (const part of formParts) part.style.display = hideForm ? "none" : "";
+    // The droplet/DigitalOcean fields don't apply to a home-server game.
+    if (!hideForm && holocron) {
+      sshKeyWrap.style.display = "none";
+      regionWrap.style.display = "none";
+      tierWrap.style.display = "none";
+    }
+    sqlUserField.wrap.style.display = holocron ? "none" : "";
+    sqlPasswordField.wrap.style.display = holocron ? "none" : "";
     startNewRow.style.display = resolved ? "" : "none";
 
     // Skip the availability checks entirely while the form is hidden — a
     // run in flight, or a finished create whose log we're still showing.
-    if (!hideForm && state.appName !== tiersLoadedForApp) {
+    if (!hideForm && !holocron && state.appName !== tiersLoadedForApp) {
       tiersLoadedForApp = state.appName;
       void refreshRegions().then(refreshTiers);
     }
-    if (!hideForm && state.opsDir && keysLoadedForOpsDir !== state.opsDir) {
+    if (!hideForm && !holocron && state.opsDir && keysLoadedForOpsDir !== state.opsDir) {
       keysLoadedForOpsDir = state.opsDir;
       void refreshKeys();
     }
@@ -767,7 +800,11 @@ export function createDeployPanel(): { el: HTMLElement; render: () => void } {
       backupWarning.textContent = "Fix the failing Prerequisites checks above before deploying.";
     } else {
       const ok = await hasBackups(state.opsDir, state.appName);
-      backupWarning.textContent = ok ? "" : "No backups/*.gpg found for this game — deploy will fail without one.";
+      backupWarning.textContent = ok
+        ? ""
+        : holocron
+          ? "No backups/*.gpg found for this game — a fresh, empty database will be created."
+          : "No backups/*.gpg found for this game — deploy will fail without one.";
     }
   }
 

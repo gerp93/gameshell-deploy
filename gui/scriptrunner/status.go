@@ -127,6 +127,10 @@ type GameStatus struct {
 	// MaxUptimeHours is deploy.conf's MAX_UPTIME_HOURS; 0 means no limit.
 	MaxUptimeHours int          `json:"maxUptimeHours"`
 	Status         StatusResult `json:"status"`
+	// Error is set when the game's status could not be read (e.g. the home
+	// server is switched off), so the sidebar can say "unknown" instead of
+	// showing a made-up "not deployed".
+	Error string `json:"error"`
 }
 
 // GameRef is what ListGameStatuses needs to know about a game from its

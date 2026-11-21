@@ -99,6 +99,39 @@ compares and pushes. Leave it blank to use the repo's own default branch,
 which `create.sh` detects rather than assuming `main`. A branch that doesn't
 exist on the remote is caught before the droplet is created.
 
+## Running on the home server instead of DigitalOcean (the "holocron" target)
+
+A game's `deploy.conf` can set `TARGET=holocron` (see the commented block at the end of
+[deploy.conf.template](deploy.conf.template)) to run on the always-on home server, a Debian box with Docker,
+instead of DigitalOcean. The commands are the same (`./create.sh APP`, `./delete.sh APP`, `./redeploy.sh APP`),
+with the same `games/APP/deploy.conf` and the same GPG-encrypted `backups/`; unset, `TARGET` defaults to DigitalOcean and
+nothing about that path changes. The code is in [targets/holocron.sh](targets/holocron.sh).
+
+- **Needs** (on the box): the shared MariaDB container from the [Holocron](https://github.com/gerp93/Holocron) repo
+  (`sudo ./bootstrap.sh`, `services/mariadb/`), `git`, Docker, and passwordless `sudo` for the login user. On this PC: `ssh`
+  access to the box with a key and `gpg`; no Docker and no `doctl`. The ssh target is never stored here: it is
+  `HOLOCRON_SSH_TARGET`, or `DEPLOY_TARGET` from `~/.config/kvguzzler/deploy.env`.
+- **create:** checks the box, makes one database and one user for the game in the shared MariaDB (the password is generated on the
+  box into `/etc/holocron/games/APP.env`, mode 0600, never printed), restores the newest backup (decrypted here and piped in,
+  never written to disk on this PC), clones the game's GitHub repo on the box, builds its own `Dockerfile` there at low priority
+  (capped at 1 CPU so the house server is not starved) and starts the container `game_APP`, published on
+  `HOLOCRON_BIND:HOLOCRON_HOST_PORT` (default `127.0.0.1` only). If any step fails, what was created is rolled back.
+  No DigitalOcean account, tier, region or ssh key option applies (`--tier`, `--region`, `--ssh-key` are ignored).
+- **delete:** same five-check dump as DigitalOcean (made on the box, streamed through `gpg` into `backups/`, then verified by
+  decrypting it), then removes the container, images, sources, env file, database and user, and takes the game off Funnel if it
+  was on it. If the backup fails nothing is removed.
+- **redeploy:** fork-sync, the destructive-SQL warning, a live `--single-transaction` backup, then a rebuild on the box and a
+  container swap (a few seconds of downtime). If the new container does not answer, the previous image is put back.
+  `--check` reads the deployed commit from the container. Env vars (database host, extra API keys) are not re-written, as on
+  DigitalOcean; delete and create again to change them.
+- **Internet access:** a new game is private. `./funnel.sh APP on|off|status` publishes it through Tailscale Funnel on
+  `HOLOCRON_FUNNEL_PORT`. Funnel only allows ports 443, 8443 and 10000 on the box's `.ts.net` name, so at most three games, one
+  per port. Two account settings in the Tailscale admin console come first and are never changed by this tool: DNS > HTTPS
+  Certificates, and an access-policy entry that allows Funnel for the box.
+- The GUI (`gui/`) supports it too: pick **Home server** as the target on a game's Config tab (see [gui/README.md](gui/README.md)). It
+  has the scripts use the Windows `ssh.exe`, since WSL has no key for the box, and passes API keys to `targets/holocron.sh` through
+  the same temporary `EXTRA_ENV_YAML_FILE` it uses for DigitalOcean.
+
 ## How env vars line up
 
 `ENV_VAR_PREFIX` in `deploy.conf` is the single value that keeps the app and its

@@ -73,6 +73,9 @@ type CreateRequest struct {
 	// EXTRA_ENV_VARS. Keys are the env var names copied onto the DO app;
 	// values come from the operator (never from deploy.conf).
 	ExtraEnv []ExtraEnvVar `json:"extraEnv"`
+	// ScriptEnv is extra KEY=VALUE environment for the script, set by the Go
+	// side (never the frontend) for games that run on the home server.
+	ScriptEnv []string `json:"-"`
 }
 
 // DeleteRequest mirrors delete.sh's positional arg + flags. Backup is
@@ -87,6 +90,8 @@ type DeleteRequest struct {
 	Backup        string `json:"backup"`
 	SSHKeyName    string `json:"sshKeyName"`
 	GPGPassphrase string `json:"gpgPassphrase"`
+	// ScriptEnv: see CreateRequest.
+	ScriptEnv []string `json:"-"`
 }
 
 // RedeployRequest mirrors redeploy.sh's positional arg + flags. Backup is
@@ -102,6 +107,8 @@ type RedeployRequest struct {
 	SSHKeyName    string `json:"sshKeyName"`
 	GPGPassphrase string `json:"gpgPassphrase"`
 	ForceRebuild  bool   `json:"forceRebuild"`
+	// ScriptEnv: see CreateRequest.
+	ScriptEnv []string `json:"-"`
 }
 
 // runningCmds tracks the one in-flight script per app name — deploying or
@@ -135,6 +142,7 @@ func RunCreate(req CreateRequest, emit Emitter) error {
 	if req.GPGPassphrase != "" {
 		env = append(env, "GPG_PASSPHRASE="+req.GPGPassphrase)
 	}
+	env = append(env, req.ScriptEnv...)
 	// Extra keys go into a YAML tempfile that create.sh cats into the spec,
 	// the same way SQL values land via sed — not as WSL `env KEY=VAL` argv.
 	// That's how YouTube/Claude keys were getting dropped while SQL still
@@ -168,6 +176,7 @@ func RunDelete(req DeleteRequest, emit Emitter) error {
 	if req.GPGPassphrase != "" {
 		env = append(env, "GPG_PASSPHRASE="+req.GPGPassphrase)
 	}
+	env = append(env, req.ScriptEnv...)
 	scriptPath := filepath.Join(req.OpsDir, "delete.sh")
 	return run(req.AppName, req.OpsDir, scriptPath, args, env, "delete", emit)
 }
@@ -189,6 +198,7 @@ func RunRedeploy(req RedeployRequest, emit Emitter) error {
 	if req.GPGPassphrase != "" {
 		env = append(env, "GPG_PASSPHRASE="+req.GPGPassphrase)
 	}
+	env = append(env, req.ScriptEnv...)
 	scriptPath := filepath.Join(req.OpsDir, "redeploy.sh")
 	return run(req.AppName, req.OpsDir, scriptPath, args, env, "redeploy", emit)
 }
@@ -334,6 +344,12 @@ type StatusResult struct {
 	// original creation time — which is what "how long has this been up"
 	// should mean for billing.
 	UpSince string `json:"upSince"`
+	// Holocron is true when the game runs on the home server (TARGET=holocron).
+	// There DropletExists means "its database exists" and AppExists "its
+	// container exists", so the same Deploy/Manage logic applies to both.
+	Holocron bool `json:"holocron"`
+	// FunnelOn is whether Tailscale Funnel is serving the game (home server only).
+	FunnelOn bool `json:"funnelOn"`
 }
 
 // CheckStatus looks up appName (deploy.conf's APP_NAME, not the games/

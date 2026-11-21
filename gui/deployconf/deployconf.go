@@ -38,6 +38,20 @@ type DeployConf struct {
 	GitRepo       string `json:"gitRepo"`
 	GitUpstream   string `json:"gitUpstream"`
 	GitBranch     string `json:"gitBranch"`
+	// Target is where the game runs: "" or "digitalocean" (the default) or
+	// "holocron" (the home server, see targets/holocron.sh). The Holocron*
+	// fields below only apply when it is "holocron".
+	Target string `json:"target"`
+	// HolocronHostPort is the port on the home server the game is published
+	// on (one per game). HolocronFunnelPort is the Tailscale Funnel port
+	// (443, 8443 or 10000) funnel.sh uses; HolocronBind is 127.0.0.1 (the
+	// default) or 0.0.0.0 (also on the LAN/tailnet). CPUs and Memory are the
+	// container limits (blank = the script defaults, 1 and 512m).
+	HolocronHostPort   string `json:"holocronHostPort"`
+	HolocronFunnelPort string `json:"holocronFunnelPort"`
+	HolocronBind       string `json:"holocronBind"`
+	HolocronCpus       string `json:"holocronCpus"`
+	HolocronMemory     string `json:"holocronMemory"`
 	DropletRegion string `json:"dropletRegion"`
 	DropletImage  string `json:"dropletImage"`
 	DropletSize   string `json:"dropletSize"`
@@ -69,6 +83,12 @@ var fields = []field{
 	{"GIT_REPO", func(c *DeployConf) *string { return &c.GitRepo }},
 	{"GIT_UPSTREAM", func(c *DeployConf) *string { return &c.GitUpstream }},
 	{"GIT_BRANCH", func(c *DeployConf) *string { return &c.GitBranch }},
+	{"TARGET", func(c *DeployConf) *string { return &c.Target }},
+	{"HOLOCRON_HOST_PORT", func(c *DeployConf) *string { return &c.HolocronHostPort }},
+	{"HOLOCRON_FUNNEL_PORT", func(c *DeployConf) *string { return &c.HolocronFunnelPort }},
+	{"HOLOCRON_BIND", func(c *DeployConf) *string { return &c.HolocronBind }},
+	{"HOLOCRON_CPUS", func(c *DeployConf) *string { return &c.HolocronCpus }},
+	{"HOLOCRON_MEMORY", func(c *DeployConf) *string { return &c.HolocronMemory }},
 	{"DROPLET_REGION", func(c *DeployConf) *string { return &c.DropletRegion }},
 	{"DROPLET_IMAGE", func(c *DeployConf) *string { return &c.DropletImage }},
 	{"DROPLET_SIZE", func(c *DeployConf) *string { return &c.DropletSize }},
@@ -242,6 +262,12 @@ func Save(path string, conf DeployConf) error {
 	return os.WriteFile(path, []byte(strings.Join(out, "\n")+"\n"), 0o644)
 }
 
+// IsHolocron reports whether the game runs on the home server (TARGET=holocron)
+// rather than DigitalOcean.
+func (c DeployConf) IsHolocron() bool {
+	return strings.TrimSpace(c.Target) == "holocron"
+}
+
 // MaxUptime returns conf's MAX_UPTIME_HOURS as a number of hours, or 0 when it
 // is blank or not a positive whole number (no limit).
 func (c DeployConf) MaxUptime() int {
@@ -322,6 +348,14 @@ func Validate(conf DeployConf) []string {
 	requireNonEmpty(&errs, "HTTP_PORT", conf.HTTPPort)
 	requireNonEmpty(&errs, "GIT_REPO", conf.GitRepo)
 
+	switch strings.TrimSpace(conf.Target) {
+	case "", "digitalocean":
+	case "holocron":
+		validateHolocron(&errs, conf)
+	default:
+		errs = append(errs, "TARGET must be digitalocean or holocron (or blank for digitalocean)")
+	}
+
 	if conf.HTTPPort != "" {
 		if _, err := strconv.Atoi(conf.HTTPPort); err != nil {
 			errs = append(errs, "HTTP_PORT must be numeric")
@@ -350,6 +384,40 @@ func Validate(conf DeployConf) []string {
 	}
 	errs = append(errs, validateSecretChecks(conf)...)
 	return errs
+}
+
+var holocronCpusPattern = regexp.MustCompile(`^[0-9]+(\.[0-9]+)?$`)
+var holocronMemoryPattern = regexp.MustCompile(`^[0-9]+[mMgG]$`)
+
+// validateHolocron mirrors the checks targets/holocron.sh makes before it
+// touches the home server, so a typo is caught in the form rather than partway
+// into a run.
+func validateHolocron(errs *[]string, conf DeployConf) {
+	port, err := strconv.Atoi(strings.TrimSpace(conf.HolocronHostPort))
+	switch {
+	case strings.TrimSpace(conf.HolocronHostPort) == "":
+		*errs = append(*errs, "HOLOCRON_HOST_PORT is required for the home server")
+	case err != nil || port < 1024 || port > 65535:
+		*errs = append(*errs, "HOLOCRON_HOST_PORT must be a port from 1024 to 65535")
+	case port == 2283 || port == 8080 || port == 3306:
+		*errs = append(*errs, "HOLOCRON_HOST_PORT is used by something else on the home server (Immich 2283, house server 8080, MariaDB 3306)")
+	}
+	switch strings.TrimSpace(conf.HolocronFunnelPort) {
+	case "", "443", "8443", "10000":
+	default:
+		*errs = append(*errs, "HOLOCRON_FUNNEL_PORT must be 443, 8443 or 10000 (the only ports Tailscale Funnel allows)")
+	}
+	switch strings.TrimSpace(conf.HolocronBind) {
+	case "", "127.0.0.1", "0.0.0.0":
+	default:
+		*errs = append(*errs, "HOLOCRON_BIND must be 127.0.0.1 or 0.0.0.0")
+	}
+	if v := strings.TrimSpace(conf.HolocronCpus); v != "" && !holocronCpusPattern.MatchString(v) {
+		*errs = append(*errs, "HOLOCRON_CPUS must be a number such as 1 or 1.5")
+	}
+	if v := strings.TrimSpace(conf.HolocronMemory); v != "" && !holocronMemoryPattern.MatchString(v) {
+		*errs = append(*errs, "HOLOCRON_MEMORY must look like 512m or 1g")
+	}
 }
 
 // validateSecretChecks makes sure each check belongs to a listed extra env

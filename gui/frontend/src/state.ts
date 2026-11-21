@@ -148,6 +148,12 @@ export function notify(): void {
   for (const l of listeners) l();
 }
 
+// True when the selected game runs on the home server (TARGET=holocron) rather
+// than DigitalOcean, which decides which Deploy/Manage fields make sense.
+export function isHolocronGame(): boolean {
+  return state.deployConf?.target === "holocron";
+}
+
 export function preflightPassed(): boolean {
   if (!state.preflight) return false;
   if (state.preflight.wslBlocking) return false;
