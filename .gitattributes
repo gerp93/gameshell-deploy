@@ -1,0 +1,5 @@
+# These run on Linux (droplet user-data, doctl hosts) — force LF regardless of
+# the checkout platform so CRLF never sneaks in on Windows.
+*.sh    text eol=lf
+*.yaml  text eol=lf
+deploy.conf text eol=lf
