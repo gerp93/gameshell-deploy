@@ -77,5 +77,9 @@ jobs:
       extra_stage_paths: "create.sh delete.sh redeploy.sh funnel.sh targets README.md CLAUDE.md templates deploy.conf.template games"
       windows_installer_scope: perUser
       windows_installer_preserve_paths: games
+      # Tests run at release (KVG_Standards README). The root package embeds
+      # frontend/dist, which does not exist until 'wails build', so it is
+      # left out; every other package (all the ones with tests) is run.
+      test_command: go vet $(go list -e ./... | grep -vx gameshell-deploy-gui) && go test $(go list -e ./... | grep -vx gameshell-deploy-gui)
     permissions:
       contents: write

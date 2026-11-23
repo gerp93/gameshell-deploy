@@ -18,3 +18,14 @@ gui/frontend/dist/
 gui/frontend/node_modules/
 gui/frontend/wailsjs/
 gui/build/bin/
+
+# secrets — KVG_Standards secrets.md baseline. Tracked config holds secret
+# NAMES only (deploy.conf.template / EXTRA_ENV_VARS); values come from the
+# operator's environment, and the holocron ssh target from
+# ~/.config/kvguzzler/deploy.env outside this repo.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets.json
